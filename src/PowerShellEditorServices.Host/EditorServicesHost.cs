@@ -100,38 +100,38 @@ namespace Microsoft.PowerShell.EditorServices.Host
         }
 
         /// <summary>
-        /// Starts the language service with the specified named pipe server name.
+        /// Starts the language service with the specified TCP socket port.
         /// </summary>
-        /// <param name="languageServicePipeName">The named pipe server name for the language service.</param>
+        /// <param name="languageServicePort">The port number for the language service.</param>
         /// <param name="profilePaths">The object containing the profile paths to load for this session.</param>
-        public void StartLanguageService(string languageServicePipeName, ProfilePaths profilePaths)
+        public void StartLanguageService(int languageServicePort, ProfilePaths profilePaths)
         {
             this.languageServer =
                 new LanguageServer(
                     hostDetails,
                     profilePaths,
-                    new NamedPipeServerChannel(languageServicePipeName));
+                    new TcpSocketServerChannel(languageServicePort));
 
             this.languageServer.Start().Wait();
 
             Logger.Write(
                 LogLevel.Normal,
                 string.Format(
-                    "Language service started, listening on named pipe: {0}",
-                    languageServicePipeName));
+                    "Language service started, listening on port {0}",
+                    languageServicePort));
         }
 
         /// <summary>
-        /// Starts the debug service with the specified named pipe server name.
+        /// Starts the debug service with the specified TCP socket port.
         /// </summary>
-        /// <param name="debugServicePipeName">The named pipe server name for the debug service.</param>
-        public void StartDebugService(string debugServicePipeName, ProfilePaths profilePaths)
+        /// <param name="debugServicePort">The port number for the debug service.</param>
+        public void StartDebugService(int debugServicePort, ProfilePaths profilePaths)
         {
             this.debugAdapter =
                 new DebugAdapter(
                     hostDetails,
                     profilePaths,
-                    new NamedPipeServerChannel(debugServicePipeName));
+                    new TcpSocketServerChannel(debugServicePort));
 
             this.debugAdapter.SessionEnded +=
                 (obj, args) =>
@@ -140,7 +140,7 @@ namespace Microsoft.PowerShell.EditorServices.Host
                         LogLevel.Normal,
                         "Previous debug session ended, restarting debug service...");
 
-                    this.StartDebugService(debugServicePipeName, profilePaths);
+                    this.StartDebugService(debugServicePort, profilePaths);
                 };
 
             this.debugAdapter.Start().Wait();
@@ -148,8 +148,8 @@ namespace Microsoft.PowerShell.EditorServices.Host
             Logger.Write(
                 LogLevel.Normal,
                 string.Format(
-                    "Debug service started, listening on named pipe: {0}",
-                    debugServicePipeName));
+                    "Debug service started, listening on port {0}",
+                    debugServicePort));
         }
 
         /// <summary>

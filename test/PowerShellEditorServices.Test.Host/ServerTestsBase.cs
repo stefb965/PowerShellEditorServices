@@ -25,10 +25,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
         private ConcurrentDictionary<string, AsyncQueue<object>> requestQueuePerType =
             new ConcurrentDictionary<string, AsyncQueue<object>>();
 
-        protected async Task LaunchService(
+        protected async Task<Tuple<int, int>> LaunchService(
             string logPath,
-            string languageServicePipeName,
-            string debugServicePipeName,
             bool waitForDebugger = false)
         {
             string modulePath = Path.GetFullPath(@"..\..\..\..\module");
@@ -42,12 +40,9 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
                 "-HostName \\\"PowerShell Editor Services Test Host\\\" " +
                 "-HostProfileId \"Test.PowerShellEditorServices\" " +
                 "-HostVersion \"1.0.0\" " +
-                "-LanguageServicePipeName \"" + languageServicePipeName + "\" " +
-                "-DebugServicePipeName \"" + debugServicePipeName + "\" " +
                 "-BundledModulesPath \\\"" + modulePath + "\\\" " +
                 "-LogLevel \"Verbose\" " +
-                "-LogPath \"" + logPath + "\" " +
-                "-WaitForCompletion ";
+                "-LogPath \"" + logPath + "\" ";
 
             if (waitForDebugger)
             {
@@ -88,7 +83,14 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
                     this.serviceProcess.StandardOutput.ReadLineAsync(),
                     this.serviceProcess.StandardError.ReadLineAsync());
 
-            if (!string.Equals("PowerShell Editor Services host has started.", completedRead.Result))
+            if (completedRead.Result.StartsWith("started"))
+            {
+                string[] portNumStrings = completedRead.Result.Split(' ');
+                return new Tuple<int, int>(
+                    int.Parse(portNumStrings[1]),
+                    int.Parse(portNumStrings[2]));
+            }
+            else
             {
                 // Must have read an error?  Keep reading from error stream
                 string errorString = completedRead.Result;

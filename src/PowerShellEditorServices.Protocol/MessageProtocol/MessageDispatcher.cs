@@ -61,8 +61,6 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol
         public MessageDispatcher(ChannelBase protocolChannel)
         {
             this.protocolChannel = protocolChannel;
-            this.MessageReader = protocolChannel.MessageReader;
-            this.MessageWriter = protocolChannel.MessageWriter;
         }
 
         #endregion
@@ -71,6 +69,10 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol
 
         public void Start()
         {
+            // At this point the MessageReader and MessageWriter should be ready
+            this.MessageReader = protocolChannel.MessageReader;
+            this.MessageWriter = protocolChannel.MessageWriter;
+
             // Start the main message loop thread.  The Task is
             // not explicitly awaited because it is running on
             // an independent background thread.
