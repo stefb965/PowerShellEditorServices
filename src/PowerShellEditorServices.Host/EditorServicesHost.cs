@@ -14,6 +14,13 @@ using System.Threading;
 
 namespace Microsoft.PowerShell.EditorServices.Host
 {
+    public enum EditorServicesHostStatus
+    {
+        Started,
+        Failed,
+        Ended
+    }
+
     /// <summary>
     /// Provides a simplified interface for hosting the language and debug services
     /// over the named pipe server protocol.
@@ -26,6 +33,16 @@ namespace Microsoft.PowerShell.EditorServices.Host
         private string bundledModulesPath;
         private DebugAdapter debugAdapter;
         private LanguageServer languageServer;
+
+        #endregion
+
+        #region Properties
+
+        public EditorServicesHostStatus Status { get; private set; }
+
+        public int LanguageServicePort { get; private set; }
+
+        public int DebugServicePort { get; private set; }
 
         #endregion
 

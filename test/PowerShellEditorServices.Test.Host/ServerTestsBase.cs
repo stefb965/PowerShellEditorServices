@@ -5,6 +5,7 @@
 
 using Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol;
 using Microsoft.PowerShell.EditorServices.Utility;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -78,17 +79,21 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
             this.serviceProcess.Start();
 
             // Wait for the server to finish initializing
-            Task<string> completedRead =
-                await Task.WhenAny<string>(
-                    this.serviceProcess.StandardOutput.ReadLineAsync(),
-                    this.serviceProcess.StandardError.ReadLineAsync());
+            Task<string> stdoutTask = this.serviceProcess.StandardOutput.ReadLineAsync();
+            Task<string> stderrTask = this.serviceProcess.StandardError.ReadLineAsync();
+            Task<string> completedRead = await Task.WhenAny<string>(stdoutTask, stderrTask);
 
-            if (completedRead.Result.StartsWith("started"))
+            if (completedRead == stdoutTask)
             {
-                string[] portNumStrings = completedRead.Result.Split(' ');
-                return new Tuple<int, int>(
-                    int.Parse(portNumStrings[1]),
-                    int.Parse(portNumStrings[2]));
+                JObject result = JObject.Parse(completedRead.Result);
+                if (result["status"].Value<string>() == "started")
+                {
+                    return new Tuple<int, int>(
+                        result["languageServicePort"].Value<int>(),
+                        result["debugServicePort"].Value<int>());
+                }
+
+                return null;
             }
             else
             {

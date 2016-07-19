@@ -54,6 +54,11 @@ param(
     $ConfirmInstall
 )
 
+# This variable will be assigned later to contain information about
+# what happened while attempting to launch the PowerShell Editor
+# Services host
+$resultDetails = $null;
+
 function Test-ModuleAvailable($ModuleName, $ModuleVersion) {
     $modules = Get-Module -ListAvailable $moduleName
     if ($modules -ne $null) {
@@ -161,8 +166,15 @@ $editorServicesHost =
 
 # TODO: Verify that the service is started
 
+$resultDetails = @{
+    "status" = "started";
+    "channel" = "tcp";
+    "languageServicePort" = $languageServicePort;
+    "debugServicePort" = $debugServicePort;
+};
+
 # Notify the client that the services have started
-Write-Output "started $languageServicePort $debugServicePort"
+Write-Output (ConvertTo-Json -InputObject $resultDetails -Compress)
 
 # Wait for the host to complete execution before exiting
 $editorServicesHost.WaitForCompletion()
