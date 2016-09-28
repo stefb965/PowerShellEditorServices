@@ -7,7 +7,6 @@ using Microsoft.PowerShell.EditorServices.Extensions;
 using Microsoft.PowerShell.EditorServices.Protocol.LanguageServer;
 using Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol;
 using Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol.Channel;
-using Microsoft.PowerShell.EditorServices.Session;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Collections.Generic;
@@ -25,54 +24,17 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
     {
         private static CancellationTokenSource existingRequestCancellation;
 
-        private bool profilesLoaded;
         private EditorSession editorSession;
-        private OutputDebouncer outputDebouncer;
         private LanguageServerEditorOperations editorOperations;
         private LanguageServerSettings currentSettings = new LanguageServerSettings();
 
-        /// <param name="hostDetails">
-        /// Provides details about the host application.
-        /// </param>
-        public LanguageServer(HostDetails hostDetails, ProfilePaths profilePaths)
-            : this(hostDetails, profilePaths, new StdioServerChannel())
-        {
-        }
-
-        /// <param name="hostDetails">
-        /// Provides details about the host application.
-        /// </param>
-        public LanguageServer(HostDetails hostDetails, ProfilePaths profilePaths, ChannelBase serverChannel)
+        public LanguageServer(EditorSession editorSession, ChannelBase serverChannel)
             : base(serverChannel)
         {
-            this.editorSession = new EditorSession();
-            this.editorSession.StartSession(hostDetails, profilePaths);
-            this.editorSession.ConsoleService.OutputWritten += this.powerShellContext_OutputWritten;
-
-            // Attach to ExtensionService events
-            this.editorSession.ExtensionService.CommandAdded += ExtensionService_ExtensionAdded;
-            this.editorSession.ExtensionService.CommandUpdated += ExtensionService_ExtensionUpdated;
-            this.editorSession.ExtensionService.CommandRemoved += ExtensionService_ExtensionRemoved;
-
-            // Create the IEditorOperations implementation
-            this.editorOperations =
-                new LanguageServerEditorOperations(
-                    this.editorSession,
-                    this);
-
-            // Always send console prompts through the UI in the language service
-            // TODO: This will change later once we have a general REPL available
-            // in VS Code.
-            this.editorSession.ConsoleService.PushPromptHandlerContext(
-                new ProtocolPromptHandlerContext(
-                    this,
-                    this.editorSession.ConsoleService));
-
-            // Set up the output debouncer to throttle output event writes
-            this.outputDebouncer = new OutputDebouncer(this);
+            this.editorSession = editorSession;
         }
 
-        protected override void Initialize()
+        protected override async Task Initialize()
         {
             // Register all supported message types
 
@@ -103,24 +65,24 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
 
             this.SetRequestHandler(DebugAdapterMessages.EvaluateRequest.Type, this.HandleEvaluateRequest);
 
+            // Attach to ExtensionService events
+            this.editorSession.ExtensionService.CommandAdded += ExtensionService_ExtensionAdded;
+            this.editorSession.ExtensionService.CommandUpdated += ExtensionService_ExtensionUpdated;
+            this.editorSession.ExtensionService.CommandRemoved += ExtensionService_ExtensionRemoved;
+
+            // Create the IEditorOperations implementation
+            this.editorOperations =
+                new LanguageServerEditorOperations(
+                    this.editorSession,
+                    this);
+
             // Initialize the extension service
-            // TODO: This should be made awaited once Initialize is async!
-            this.editorSession.ExtensionService.Initialize(
-                this.editorOperations).Wait();
+            await this.editorSession.ExtensionService.Initialize(this.editorOperations);
         }
 
         protected override async Task Shutdown()
         {
-            // Make sure remaining output is flushed before exiting
-            await this.outputDebouncer.Flush();
-
             Logger.Write(LogLevel.Normal, "Language service is shutting down...");
-
-            if (this.editorSession != null)
-            {
-                this.editorSession.Dispose();
-                this.editorSession = null;
-            }
         }
 
         #region Built-in Message Handlers
@@ -352,14 +314,6 @@ function __Expand-Alias {
             this.currentSettings.Update(
                 configChangeParams.Settings.Powershell, 
                 this.editorSession.Workspace.WorkspacePath);
-
-            if (!this.profilesLoaded &&
-                this.currentSettings.EnableProfileLoading &&
-                oldLoadProfiles != this.currentSettings.EnableProfileLoading)
-            {
-                await this.editorSession.PowerShellContext.LoadHostProfiles();
-                this.profilesLoaded = true;
-            }
 
             // If there is a new settings file path, restart the analyzer with the new settigs.
             bool settingsPathChanged = false;
@@ -840,12 +794,6 @@ function __Expand-Alias {
         #endregion
 
         #region Event Handlers
-
-        private async void powerShellContext_OutputWritten(object sender, OutputWrittenEventArgs e)
-        {
-            // Queue the output for writing
-            await this.outputDebouncer.Invoke(e);
-        }
 
         private async void ExtensionService_ExtensionAdded(object sender, EditorCommand e)
         {

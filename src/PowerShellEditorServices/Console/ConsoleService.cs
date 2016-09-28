@@ -56,7 +56,7 @@ namespace Microsoft.PowerShell.EditorServices.Console
         {
             // Register this instance as the IConsoleHost for the PowerShellContext
             this.powerShellContext = powerShellContext;
-            this.powerShellContext.ConsoleHost = this;
+            //this.powerShellContext.ConsoleHost = this;
 
             // Set the default prompt handler factory or create
             // a default if one is not provided

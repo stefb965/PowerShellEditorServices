@@ -22,16 +22,14 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             this.serverChannel = serverChannel;
         }
 
-        protected override Task OnStart()
+        protected override async Task OnStart()
         {
             // Register handlers for server lifetime messages
             this.SetRequestHandler(ShutdownRequest.Type, this.HandleShutdownRequest);
             this.SetEventHandler(ExitNotification.Type, this.HandleExitNotification);
 
             // Initialize the implementation class
-            this.Initialize();
-
-            return Task.FromResult(true);
+            await this.Initialize();
         }
 
         protected override async Task OnStop()
@@ -43,7 +41,7 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
         /// Overridden by the subclass to provide initialization
         /// logic after the server channel is started.
         /// </summary>
-        protected abstract void Initialize();
+        protected abstract Task Initialize();
 
         /// <summary>
         /// Can be overridden by the subclass to provide shutdown

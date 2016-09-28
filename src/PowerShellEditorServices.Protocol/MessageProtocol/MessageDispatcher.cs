@@ -319,12 +319,30 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol
                 {
                     if (!(e.InnerExceptions[0] is TaskCanceledException))
                     {
+                        // Log any exception thrown by a message handler
+                        this.LogMessageHandlerException(messageToDispatch, e);
+
                         // Cancelled tasks aren't a problem, so rethrow
                         // anything that isn't a TaskCanceledException
                         throw e;
                     }
                 }
+                catch (Exception e)
+                {
+                    // Log any exception thrown by a message handler
+                    this.LogMessageHandlerException(messageToDispatch, e);
+
+                    // Rethrow the exception since we are only concerned with logging failures
+                    throw e;
+                }
             }
+        }
+
+        private void LogMessageHandlerException(Message messageDetails, Exception e)
+        {
+            Logger.Write(
+                LogLevel.Error,
+                $"Exception thrown by handler for {messageDetails.MessageType} '{messageDetails.Method}':\r\n\r\n{e.ToString()}");
         }
 
         private void OnListenTaskCompleted(Task listenTask)

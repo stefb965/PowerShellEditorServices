@@ -73,14 +73,16 @@ namespace Microsoft.PowerShell.EditorServices.Extensions
         {
             this.EditorObject = new EditorObject(this, editorOperations);
 
+            Logger.Write(LogLevel.Verbose, "Adding $psEditor variable to session");
+
             // Register the editor object in the runspace
-            PSCommand variableCommand = new PSCommand();
-            using (RunspaceHandle handle = await this.PowerShellContext.GetRunspaceHandle())
-            {
-                handle.Runspace.SessionStateProxy.PSVariable.Set(
-                    "psEditor",
-                    this.EditorObject);
-            }
+            await this.PowerShellContext.ExecuteWithRunspace(
+                runspace =>
+                {
+                    runspace.SessionStateProxy.PSVariable.Set(
+                        "psEditor",
+                        this.EditorObject);
+                });
 
             // Load the cmdlet interface
             Type thisType = this.GetType();

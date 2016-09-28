@@ -7,7 +7,6 @@ using Microsoft.PowerShell.EditorServices.Debugging;
 using Microsoft.PowerShell.EditorServices.Protocol.DebugAdapter;
 using Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol;
 using Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol.Channel;
-using Microsoft.PowerShell.EditorServices.Session;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Collections.Generic;
@@ -21,28 +20,17 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
     public class DebugAdapter : DebugAdapterBase
     {
         private EditorSession editorSession;
-        private OutputDebouncer outputDebouncer;
         private bool isConfigurationDoneRequestComplete;
         private bool isLaunchRequestComplete;
         private bool noDebug;
         private string scriptPathToLaunch;
         private string arguments;
 
-        public DebugAdapter(HostDetails hostDetails, ProfilePaths profilePaths)
-            : this(hostDetails, profilePaths, new StdioServerChannel())
-        {
-        }
-
-        public DebugAdapter(HostDetails hostDetails, ProfilePaths profilePaths, ChannelBase serverChannel)
+        public DebugAdapter(EditorSession editorSession, ChannelBase serverChannel)
             : base(serverChannel)
         {
-            this.editorSession = new EditorSession();
-            this.editorSession.StartDebugSession(hostDetails, profilePaths);
+            this.editorSession = editorSession;
             this.editorSession.DebugService.DebuggerStopped += this.DebugService_DebuggerStopped;
-            this.editorSession.ConsoleService.OutputWritten += this.powerShellContext_OutputWritten;
-
-            // Set up the output debouncer to throttle output event writes
-            this.outputDebouncer = new OutputDebouncer(this);
         }
 
         protected override void Initialize()
@@ -73,35 +61,28 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             this.SetRequestHandler(EvaluateRequest.Type, this.HandleEvaluateRequest);
         }
 
-        protected Task LaunchScript(RequestContext<object> requestContext)
+        protected void LaunchScript(RequestContext<object> requestContext)
         {
-            return editorSession.PowerShellContext
-                    .ExecuteScriptAtPath(this.scriptPathToLaunch, this.arguments)
-                    .ContinueWith(
-                        async (t) => {
-                            Logger.Write(LogLevel.Verbose, "Execution completed, terminating...");
+            // Start execution of the script but don't await it so that we
+            // don't block other debug adapter requests from coming in
+            editorSession.PowerShellContext
+                .ExecuteScriptAtPath(this.scriptPathToLaunch, this.arguments)
+                .ContinueWith(
+                    async (t) => {
+                        Logger.Write(LogLevel.Verbose, "Execution completed, terminating...");
 
-                            await requestContext.SendEvent(
-                                TerminatedEvent.Type,
-                                null);
+                        await requestContext.SendEvent(
+                            TerminatedEvent.Type,
+                            null);
 
-                            // Stop the server
-                            await this.Stop();
-                        });
+                        // Stop the server
+                        await this.Stop();
+                    });
         }
 
         protected override void Shutdown()
         {
-            // Make sure remaining output is flushed before exiting
-            this.outputDebouncer.Flush().Wait();
-
             Logger.Write(LogLevel.Normal, "Debug adapter is shutting down...");
-
-            if (this.editorSession != null)
-            {
-                this.editorSession.Dispose();
-                this.editorSession = null;
-            }
         }
 
         #region Built-in Message Handlers
@@ -191,34 +172,16 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             throw new NotImplementedException();
         }
 
-        protected Task HandleDisconnectRequest(
+        protected async Task HandleDisconnectRequest(
             object disconnectParams,
             RequestContext<object> requestContext)
         {
-            EventHandler<SessionStateChangedEventArgs> handler = null;
+            // TODO: Don't abort if this session was started with an 'attach' request
+            this.editorSession.PowerShellContext.AbortExecution();
 
-            handler =
-                async (o, e) =>
-                {
-                    if (e.NewSessionState == PowerShellContextState.Ready)
-                    {
-                        await requestContext.SendResult(null);
-                        this.editorSession.PowerShellContext.SessionStateChanged -= handler;
-
-                        // Stop the server
-                        await this.Stop();
-                    }
-                };
-
-            // In some rare cases, the EditorSession will already be disposed
-            // so we shouldn't try to abort because PowerShellContext will be null
-            if (this.editorSession != null && this.editorSession.PowerShellContext != null)
-            {
-                this.editorSession.PowerShellContext.SessionStateChanged += handler;
-                this.editorSession.PowerShellContext.AbortExecution();
-            }
-
-            return Task.FromResult(true);
+            // Respond that we're disconnecting before we shut down the server
+            await requestContext.SendResult(null);
+            await this.Stop();
         }
 
         protected async Task HandleSetBreakpointsRequest(
@@ -328,7 +291,7 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             object continueParams,
             RequestContext<object> requestContext)
         {
-            editorSession.DebugService.Continue();
+            //editorSession.DebugService.Continue();
 
             await requestContext.SendResult(null);
         }
@@ -337,7 +300,7 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             object nextParams,
             RequestContext<object> requestContext)
         {
-            editorSession.DebugService.StepOver();
+            //editorSession.DebugService.StepOver();
 
             await requestContext.SendResult(null);
         }
@@ -363,7 +326,7 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             object stepInParams,
             RequestContext<object> requestContext)
         {
-            editorSession.DebugService.StepIn();
+            //editorSession.DebugService.StepIn();
 
             await requestContext.SendResult(null);
         }
@@ -372,7 +335,7 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             object stepOutParams,
             RequestContext<object> requestContext)
         {
-            editorSession.DebugService.StepOut();
+            //editorSession.DebugService.StepOut();
 
             await requestContext.SendResult(null);
         }
@@ -565,9 +528,6 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
 
         async void DebugService_DebuggerStopped(object sender, DebuggerStopEventArgs e)
         {
-            // Flush pending output before sending the event
-            await this.outputDebouncer.Flush();
-
             // Provide the reason for why the debugger has stopped script execution.
             // See https://github.com/Microsoft/vscode/issues/3648
             // The reason is displayed in the breakpoints viewlet.  Some recommended reasons are: 
@@ -583,6 +543,8 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
                         : "breakpoint";
             }
 
+            Logger.Write(LogLevel.Verbose, "Debugger hit breakpoint, sending StoppedEvent");
+
             await this.SendEvent(
                 StoppedEvent.Type,
                 new StoppedEventBody
@@ -596,12 +558,6 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
                     ThreadId = 1, // TODO: Change this based on context
                     Reason = debuggerStoppedReason
                 });
-        }
-
-        async void powerShellContext_OutputWritten(object sender, OutputWrittenEventArgs e)
-        {
-            // Queue the output for writing
-            await this.outputDebouncer.Invoke(e);
         }
 
         #endregion

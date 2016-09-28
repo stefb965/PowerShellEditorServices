@@ -97,23 +97,23 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
                     terminatedEvent);
         }
 
-        [Fact]
-        public async Task DebugAdapterReceivesOutputEvents()
-        {
-            OutputReader outputReader = new OutputReader(this.debugAdapterClient);
+        //[Fact]
+        //public async Task DebugAdapterReceivesOutputEvents()
+        //{
+        //    OutputReader outputReader = new OutputReader(this.debugAdapterClient);
 
-            await this.LaunchScript(DebugScriptPath);
+        //    await this.LaunchScript(DebugScriptPath);
 
-            // Make sure we're getting output from the script
-            Assert.Equal("Output 1", await outputReader.ReadLine());
+        //    // Make sure we're getting output from the script
+        //    Assert.Equal("Output 1", await outputReader.ReadLine());
 
-            // Abort script execution
-            Task terminatedEvent = this.WaitForEvent(TerminatedEvent.Type);
-            await
-                Task.WhenAll(
-                    this.SendRequest(DisconnectRequest.Type, new object()),
-                    terminatedEvent);
-        }
+        //    // Abort script execution
+        //    Task terminatedEvent = this.WaitForEvent(TerminatedEvent.Type);
+        //    await
+        //        Task.WhenAll(
+        //            this.SendRequest(DisconnectRequest.Type, new object()),
+        //            terminatedEvent);
+        //}
 
         private async Task LaunchScript(string scriptPath)
         {

@@ -119,7 +119,6 @@
     <Compile Include="Session\PowerShellContextState.cs" />
     <Compile Include="Session\ProfilePaths.cs" />
     <Compile Include="Session\ProgressDetails.cs" />
-    <Compile Include="Session\RunspaceHandle.cs" />
     <Compile Include="Session\SessionPSHost.cs" />
     <Compile Include="Session\SessionPSHostRawUserInterface.cs" />
     <Compile Include="Session\SessionPSHostUserInterface.cs" />

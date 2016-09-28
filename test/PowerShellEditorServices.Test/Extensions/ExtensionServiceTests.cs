@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Management.Automation;
+using System.Management.Automation.Runspaces;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
@@ -17,6 +18,7 @@ namespace Microsoft.PowerShell.EditorServices.Test.Extensions
 {
     public class ExtensionServiceTests : IAsyncLifetime
     {
+        private Runspace runspace;
         private ScriptFile currentFile;
         private EditorContext commandContext;
         private ExtensionService extensionService;
@@ -35,7 +37,15 @@ namespace Microsoft.PowerShell.EditorServices.Test.Extensions
 
         public async Task InitializeAsync()
         {
-            this.powerShellContext = new PowerShellContext();
+            this.runspace = 
+                RunspaceFactory.CreateRunspace(
+                    InitialSessionState.CreateDefault2());
+
+            this.runspace.Open();
+
+            this.powerShellContext = new PowerShellContext(this.runspace);
+            await this.powerShellContext.Initialize();
+
             this.extensionService = new ExtensionService(this.powerShellContext);
             this.editorOperations = new TestEditorOperations();
 
@@ -58,6 +68,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Extensions
         public Task DisposeAsync()
         {
             this.powerShellContext.Dispose();
+            this.runspace.Dispose();
+
             return Task.FromResult(true);
         }
 

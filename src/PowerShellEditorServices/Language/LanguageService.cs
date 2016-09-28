@@ -87,18 +87,18 @@ namespace Microsoft.PowerShell.EditorServices
                     lineNumber,
                     columnNumber);
 
-            RunspaceHandle runspaceHandle =
-                await this.powerShellContext.GetRunspaceHandle(
-                    new CancellationTokenSource(DefaultWaitTimeoutMilliseconds).Token);
-
             CommandCompletion commandCompletion =
-                AstOperations.GetCompletions(
-                    scriptFile.ScriptAst,
-                    scriptFile.ScriptTokens,
-                    fileOffset,
-                    runspaceHandle.Runspace);
-
-            runspaceHandle.Dispose();
+                await this.powerShellContext.ExecuteWithRunspace(
+                    runspace =>
+                    {
+                        return
+                            AstOperations.GetCompletions(
+                                scriptFile.ScriptAst,
+                                scriptFile.ScriptTokens,
+                                fileOffset,
+                                runspace);
+                    });
+                    // new CancellationTokenSource(DefaultWaitTimeoutMilliseconds).Token);
 
             if (commandCompletion != null)
             {
@@ -440,7 +440,7 @@ namespace Microsoft.PowerShell.EditorServices
 
         #endregion
 
-        #region Private Fields
+        #region Private Methods 
 
         /// <summary>
         /// Gets all aliases found in the runspace
@@ -451,14 +451,14 @@ namespace Microsoft.PowerShell.EditorServices
             {
                 try
                 {
-                    RunspaceHandle runspaceHandle =
-                        await this.powerShellContext.GetRunspaceHandle(
+                    IEnumerable<CommandInfo> aliases =
+                        await this.powerShellContext.ExecuteWithRunspace(
+                            runspace =>
+                            {
+                                CommandInvocationIntrinsics invokeCommand = runspace.SessionStateProxy.InvokeCommand;
+                                return invokeCommand.GetCommands("*", CommandTypes.Alias, true);
+                            },
                             new CancellationTokenSource(DefaultWaitTimeoutMilliseconds).Token);
-
-                    CommandInvocationIntrinsics invokeCommand = runspaceHandle.Runspace.SessionStateProxy.InvokeCommand;
-                    IEnumerable<CommandInfo> aliases = invokeCommand.GetCommands("*", CommandTypes.Alias, true);
-
-                    runspaceHandle.Dispose();
 
                     foreach (AliasInfo aliasInfo in aliases)
                     {

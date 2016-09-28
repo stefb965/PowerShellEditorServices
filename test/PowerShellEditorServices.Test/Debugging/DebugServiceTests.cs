@@ -6,16 +6,20 @@
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Management.Automation;
+using System.Management.Automation.Runspaces;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 
 namespace Microsoft.PowerShell.EditorServices.Test.Debugging
 {
-    public class DebugServiceTests : IDisposable
+    public class DebugServiceTests : IAsyncLifetime
     {
+        private Runspace runspace;
         private Workspace workspace;
         private DebugService debugService;
         private ScriptFile debugScriptFile;
@@ -25,13 +29,15 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
 
         private AsyncQueue<DebuggerStopEventArgs> debuggerStoppedQueue =
             new AsyncQueue<DebuggerStopEventArgs>();
-        private AsyncQueue<SessionStateChangedEventArgs> sessionStateQueue =
-            new AsyncQueue<SessionStateChangedEventArgs>();
 
-        public DebugServiceTests()
+        public async Task InitializeAsync()
         {
-            this.powerShellContext = new PowerShellContext();
-            this.powerShellContext.SessionStateChanged += powerShellContext_SessionStateChanged;
+            this.runspace = RunspaceFactory.CreateRunspace(InitialSessionState.CreateDefault2());
+            this.runspace.Open();
+            this.runspace.Debugger.SetDebugMode(DebugModes.LocalScript);
+
+            this.powerShellContext = new PowerShellContext(this.runspace);
+            await this.powerShellContext.Initialize();
 
             this.workspace = new Workspace(this.powerShellContext.PowerShellVersion);
 
@@ -55,13 +61,10 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
                     @"..\..\..\PowerShellEditorServices.Test.Shared\Debugging\DebugTest.ps1");
         }
 
-        async void powerShellContext_SessionStateChanged(object sender, SessionStateChangedEventArgs e)
+        public async Task DisposeAsync()
         {
-            // Skip all transitions except those back to 'Ready'
-            if (e.NewSessionState == PowerShellContextState.Ready)
-            {
-                await this.sessionStateQueue.EnqueueAsync(e);
-            }
+            this.powerShellContext.Dispose();
+            this.runspace.Dispose();
         }
 
         void debugService_BreakpointUpdated(object sender, BreakpointUpdatedEventArgs e)
@@ -72,11 +75,6 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
         async void debugService_DebuggerStopped(object sender, DebuggerStopEventArgs e)
         {
             await this.debuggerStoppedQueue.EnqueueAsync(e);
-        }
-
-        public void Dispose()
-        {
-            this.powerShellContext.Dispose();
         }
 
         public static IEnumerable<object[]> DebuggerAcceptsScriptArgsTestData
@@ -91,6 +89,34 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
 
                 return data;
             }
+        }
+
+        public event EventHandler TestEvent;
+
+        [Fact]
+        public void TestingEventHack()
+        {
+            Type debuggerType = this.runspace.Debugger.GetType();
+            var eventInfo = debuggerType.GetEvent("DebuggerStop");
+            var eventField = eventInfo.DeclaringType.GetField("DebuggerStop", BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+            var eventObject = (EventHandler<DebuggerStopEventArgs>)eventField.GetValue(this.runspace.Debugger);
+            var handlerList = (eventObject as MulticastDelegate).GetInvocationList();
+            foreach (var handler in handlerList)
+            {
+                eventInfo.RemoveEventHandler(this.runspace.Debugger, handler);
+            }
+
+            EventHandler<DebuggerStopEventArgs> newHandler =
+                (obj, args) => { };
+            eventInfo.AddEventHandler(this.runspace.Debugger, newHandler);
+
+            foreach (var handler in handlerList)
+            {
+                eventInfo.AddEventHandler(this.runspace.Debugger, handler);
+            }
+
+            eventObject = (EventHandler<DebuggerStopEventArgs>)eventField.GetValue(this.runspace.Debugger);
+            var newHandlerList = eventObject.GetInvocationList();
         }
 
         [Theory]
@@ -189,8 +215,6 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
                         CommandBreakpointDetails.Create("Write-Host")
                     });
 
-            await this.AssertStateChange(PowerShellContextState.Ready);
-
             Task executeTask =
                 this.powerShellContext.ExecuteScriptAtPath(
                     this.debugScriptFile.FilePath);
@@ -268,8 +292,6 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
                         BreakpointDetails.Create("", 7)
                     });
 
-            await this.AssertStateChange(PowerShellContextState.Ready);
-
             Task executeTask =
                 this.powerShellContext.ExecuteScriptAtPath(
                     this.debugScriptFile.FilePath);
@@ -297,8 +319,6 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
                     new[] {
                         BreakpointDetails.Create("", 7, null, $"$i -eq {breakpointValue1} -or $i -eq {breakpointValue2}"),
                     });
-
-            await this.AssertStateChange(PowerShellContextState.Ready);
 
             Task executeTask =
                 this.powerShellContext.ExecuteScriptAtPath(
@@ -392,15 +412,10 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
 
             // File path is an empty string when paused while running
             await this.AssertDebuggerStopped(string.Empty); 
-            await this.AssertStateChange(
-                PowerShellContextState.Ready,
-                PowerShellExecutionResult.Stopped);
 
             // Abort execution and wait for the debugger to exit
             this.debugService.Abort();
-            await this.AssertStateChange(
-                PowerShellContextState.Ready,
-                PowerShellExecutionResult.Aborted);
+            await executeTask;
         }
 
         [Fact]
@@ -412,18 +427,14 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
 
             // Break execution and wait for the debugger to stop
             this.debugService.Break();
-            await this.AssertStateChange(
-                PowerShellContextState.Ready,
-                PowerShellExecutionResult.Stopped);
+            await this.AssertDebuggerStopped(string.Empty); 
 
             // Try running a command from outside the pipeline thread
             await this.powerShellContext.ExecuteScriptString("Get-Command Get-Process");
 
             // Abort execution and wait for the debugger to exit
             this.debugService.Abort();
-            await this.AssertStateChange(
-                PowerShellContextState.Ready,
-                PowerShellExecutionResult.Aborted);
+            await executeTask;
         }
 
         [Fact]
@@ -824,17 +835,6 @@ namespace Microsoft.PowerShell.EditorServices.Test.Debugging
             {
                 Assert.Equal(lineNumber, eventArgs.InvocationInfo.ScriptLineNumber);
             }
-        }
-
-        private async Task AssertStateChange(
-            PowerShellContextState expectedState,
-            PowerShellExecutionResult expectedResult = PowerShellExecutionResult.Completed)
-        {
-            SessionStateChangedEventArgs newState =
-                await this.sessionStateQueue.DequeueAsync();
-
-            Assert.Equal(expectedState, newState.NewSessionState);
-            Assert.Equal(expectedResult, newState.ExecutionResult);
         }
     }
 }

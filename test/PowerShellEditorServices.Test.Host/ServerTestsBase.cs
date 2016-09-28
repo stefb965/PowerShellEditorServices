@@ -35,6 +35,10 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
 
             // TODO: Need to determine the right module version programmatically!
             string editorServicesModuleVersion = "0.7.2";
+            string sessionDetailsPath =
+                Path.Combine(
+                    Path.GetTempPath(),
+                    "PSES-Session-" + Guid.NewGuid().ToString().Substring(0, 8) + ".txt");
 
             string scriptArgs =
                 string.Format(
@@ -43,10 +47,12 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
                     "-HostName \\\"PowerShell Editor Services Test Host\\\" " +
                     "-HostProfileId \"Test.PowerShellEditorServices\" " +
                     "-HostVersion \"1.0.0\" " +
+                    "-SessionDetailsPath \\\"{1}\\\"" +
                     "-BundledModulesPath \\\"" + modulePath + "\\\" " +
                     "-LogLevel \"Verbose\" " +
                     "-LogPath \"" + logPath + "\" ",
-                   editorServicesModuleVersion);
+                   editorServicesModuleVersion,
+                   sessionDetailsPath);
 
             if (waitForDebugger)
             {
@@ -57,7 +63,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
                 new string[]
                 {
                     "-NoProfile",
-                    "-NonInteractive",
+                    "-NoExit",
+                    //"-NonInteractive",
                     "-ExecutionPolicy", "Unrestricted",
                     "-Command \"" + scriptArgs + "\""
                 };
@@ -68,12 +75,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
                 {
                     FileName = "powershell.exe",
                     Arguments = string.Join(" ", args),
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardInput = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    StandardOutputEncoding = Encoding.UTF8
+                    //CreateNoWindow = true,
+                    //UseShellExecute = false,
                 },
                 EnableRaisingEvents = true,
             };
@@ -82,43 +85,66 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
             this.serviceProcess.Start();
 
             // Wait for the server to finish initializing
-            Task<string> stdoutTask = this.serviceProcess.StandardOutput.ReadLineAsync();
-            Task<string> stderrTask = this.serviceProcess.StandardError.ReadLineAsync();
-            Task<string> completedRead = await Task.WhenAny<string>(stdoutTask, stderrTask);
+            //Task<string> stdoutTask = this.serviceProcess.StandardOutput.ReadLineAsync();
+            //Task<string> stderrTask = this.serviceProcess.StandardError.ReadLineAsync();
+            //Task<string> completedRead = await Task.WhenAny<string>(stdoutTask, stderrTask);
 
-            if (completedRead == stdoutTask)
+            for (int tries = 0; tries < 10; tries++)
             {
-                JObject result = JObject.Parse(completedRead.Result);
-                if (result["status"].Value<string>() == "started")
+                try
                 {
-                    return new Tuple<int, int>(
-                        result["languageServicePort"].Value<int>(),
-                        result["debugServicePort"].Value<int>());
-                }
+                    string sessionFileContents = File.ReadAllText(sessionDetailsPath);
+                    JObject result = JObject.Parse(sessionFileContents);
+                    string status = result["status"].Value<string>(); 
 
-                return null;
-            }
-            else
-            {
-                // Must have read an error?  Keep reading from error stream
-                string errorString = completedRead.Result;
-
-                while (true)
-                {
-                    Task<string> errorRead = this.serviceProcess.StandardError.ReadLineAsync();
-
-                    if (!string.IsNullOrEmpty(errorRead.Result))
+                    if (status == "started")
                     {
-                        errorString += errorRead.Result + Environment.NewLine;
+                        return new Tuple<int, int>(
+                            result["languageServicePort"].Value<int>(),
+                            result["debugServicePort"].Value<int>());
                     }
-                    else
+                    else if(status == "error")
                     {
-                        break;
+                        // TODO MESSAGE
+                        throw new Exception("Error returned");
                     }
                 }
+                catch (FileNotFoundException)
+                {
+                    // Do nothing, try to read again after a delay
+                }
 
-                throw new Exception("Could not launch powershell.exe:\r\n\r\n" + errorString);
+                // Wait and try again
+                await Task.Delay(1000);
+                continue;
             }
+
+
+            // Failed to initialize
+            throw new TimeoutException(
+                $"Timed out while waiting for session details to be written at path: {sessionDetailsPath}");
+
+            //else
+            //{
+            //    // Must have read an error?  Keep reading from error stream
+            //    string errorString = completedRead.Result;
+
+            //    while (true)
+            //    {
+            //        Task<string> errorRead = this.serviceProcess.StandardError.ReadLineAsync();
+
+            //        if (!string.IsNullOrEmpty(errorRead.Result))
+            //        {
+            //            errorString += errorRead.Result + Environment.NewLine;
+            //        }
+            //        else
+            //        {
+            //            break;
+            //        }
+            //    }
+
+            //    throw new Exception("Could not launch powershell.exe:\r\n\r\n" + errorString);
+            //}
         }
 
         protected void KillService()

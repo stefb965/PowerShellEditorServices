@@ -9,8 +9,10 @@ using Microsoft.PowerShell.EditorServices.Session;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Diagnostics;
+using System.Management.Automation.Runspaces;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Microsoft.PowerShell.EditorServices.Host
 {
@@ -21,6 +23,28 @@ namespace Microsoft.PowerShell.EditorServices.Host
         Ended
     }
 
+    public class EditorServicesHostConfiguration
+    {
+        public HostDetails HostDetails { get; private set; }
+
+        public ProfilePaths ProfilePaths { get; set; }
+
+        public string LogFilePath { get; set; }
+
+        public LogLevel LogLevel { get; set; }
+
+        public int LanguageServicePort { get; set; }
+
+        public int DebugServicePort { get; set; }
+
+        public EditorServicesHostConfiguration(HostDetails hostDetails)
+        {
+            Validate.IsNotNull(nameof(hostDetails), hostDetails);
+
+            this.HostDetails = hostDetails;
+        }
+    }
+
     /// <summary>
     /// Provides a simplified interface for hosting the language and debug services
     /// over the named pipe server protocol.
@@ -29,16 +53,18 @@ namespace Microsoft.PowerShell.EditorServices.Host
     {
         #region Private Fields
 
-        private HostDetails hostDetails;
-        private string bundledModulesPath;
+        private Runspace sessionRunspace;
         private DebugAdapter debugAdapter;
         private LanguageServer languageServer;
+        private EditorSession editorSession;
 
         #endregion
 
         #region Properties
 
         public EditorServicesHostStatus Status { get; private set; }
+
+        public EditorServicesHostConfiguration Configuration { get; private set; }
 
         public int LanguageServicePort { get; private set; }
 
@@ -52,19 +78,35 @@ namespace Microsoft.PowerShell.EditorServices.Host
         /// Initializes a new instance of the EditorServicesHost class and waits for
         /// the debugger to attach if waitForDebugger is true.
         /// </summary>
-        /// <param name="hostDetails">The details of the host which is launching PowerShell Editor Services.</param>
-        /// <param name="bundledModulesPath">Provides a path to PowerShell modules bundled with the host, if any.  Null otherwise.</param>
-        /// <param name="waitForDebugger">If true, causes the host to wait for the debugger to attach before proceeding.</param>
         public EditorServicesHost(
-            HostDetails hostDetails,
-            string bundledModulesPath,
-            bool waitForDebugger)
+            Runspace runspace,
+            EditorServicesHostConfiguration hostConfiguration)
         {
-            Validate.IsNotNull(nameof(hostDetails), hostDetails);
+            Validate.IsNotNull(nameof(runspace), runspace);
+            Validate.IsNotNull(nameof(hostConfiguration), hostConfiguration);
 
-            this.hostDetails = hostDetails;
-            this.bundledModulesPath = bundledModulesPath;
+            this.sessionRunspace = runspace;
+            this.editorSession = new EditorSession();
+            this.Configuration = hostConfiguration;
 
+            // Catch unhandled exceptions for logging purposes
+#if !NanoServer
+            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+#endif
+        }
+
+        #endregion
+
+        #region Public Methods
+
+        public Task Start()
+        {
+            return this.Start(false);
+        }
+
+        /// <param name="waitForDebugger">If true, causes the host to wait for the debugger to attach before proceeding.</param>
+        public async Task Start(bool waitForDebugger)
+        {
 #if DEBUG
             int waitsRemaining = 10;
             if (waitForDebugger)
@@ -77,22 +119,31 @@ namespace Microsoft.PowerShell.EditorServices.Host
             }
 #endif
 
-            // Catch unhandled exceptions for logging purposes
-#if !NanoServer
-            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
-#endif
+            this.StartLogging(this.Configuration.LogFilePath, this.Configuration.LogLevel);
+            await this.StartLanguageService(this.Configuration.LanguageServicePort);
+            this.StartDebugService(this.Configuration.DebugServicePort);
         }
 
         #endregion
 
-        #region Public Methods
+        #region Events
+
+        public event EventHandler Initialized;
+
+        protected void OnInitialized()
+        {
+            Logger.Write(LogLevel.Verbose, $"Firing 'Initialized' event  (has listeners: {this.Initialized != null})");
+            this.Initialized?.Invoke(this, EventArgs.Empty);
+        }
+
+        #endregion
+
+        #region Private Methods
 
         /// <summary>
         /// Starts the Logger for the specified file path and log level.
         /// </summary>
-        /// <param name="logFilePath">The path of the log file to be written.</param>
-        /// <param name="logLevel">The minimum level of log messages to be written.</param>
-        public void StartLogging(string logFilePath, LogLevel logLevel)
+        private void StartLogging(string logFilePath, LogLevel logLevel)
         {
             Logger.Initialize(logFilePath, logLevel);
 
@@ -119,9 +170,9 @@ namespace Microsoft.PowerShell.EditorServices.Host
                 string.Format(
                     $"PowerShell Editor Services Host v{fileVersionInfo.FileVersion} starting (pid {Process.GetCurrentProcess().Id})..." + newLine + newLine +
                      "  Host application details:" + newLine + newLine +
-                    $"    Name:      {this.hostDetails.Name}" + newLine +
-                    $"    ProfileId: {this.hostDetails.ProfileId}" + newLine +
-                    $"    Version:   {this.hostDetails.Version}" + newLine +
+                    $"    Name:      {this.Configuration.HostDetails.Name}" + newLine +
+                    $"    ProfileId: {this.Configuration.HostDetails.ProfileId}" + newLine +
+                    $"    Version:   {this.Configuration.HostDetails.Version}" + newLine +
 #if !NanoServer
                     $"    Arch:      {processArchitecture}" + newLine + newLine +
                      "  Operating system details:" + newLine + newLine +
@@ -132,38 +183,115 @@ namespace Microsoft.PowerShell.EditorServices.Host
 #endif
         }
 
+        /// <param name="profilePaths">The object containing the profile paths to load for this session.</param>
+        private Task LoadProfiles(ProfilePaths profilePaths)
+        {
+            return Task.FromResult(true);
+            //// Set the $profile variable in the runspace
+            //if (this.profilePaths != null)
+            //{
+            //    this.SetProfileVariableInCurrentRunspace(profilePaths);
+            //}
+
+            //private void SetProfileVariableInCurrentRunspace(ProfilePaths profilePaths)
+            //{
+            //    // Create the $profile variable
+            //    PSObject profile = new PSObject(profilePaths.CurrentUserCurrentHost);
+
+            //    profile.Members.Add(
+            //        new PSNoteProperty(
+            //            nameof(profilePaths.AllUsersAllHosts),
+            //            profilePaths.AllUsersAllHosts));
+
+            //    profile.Members.Add(
+            //        new PSNoteProperty(
+            //            nameof(profilePaths.AllUsersCurrentHost),
+            //            profilePaths.AllUsersCurrentHost));
+
+            //    profile.Members.Add(
+            //        new PSNoteProperty(
+            //            nameof(profilePaths.CurrentUserAllHosts),
+            //            profilePaths.CurrentUserAllHosts));
+
+            //    profile.Members.Add(
+            //        new PSNoteProperty(
+            //            nameof(profilePaths.CurrentUserCurrentHost),
+            //            profilePaths.CurrentUserCurrentHost));
+
+            //    Logger.Write(
+            //        LogLevel.Verbose,
+            //        string.Format(
+            //            "Setting $profile variable in runspace.  Current user host profile path: {0}",
+            //            profilePaths.CurrentUserCurrentHost));
+
+            //    // Set the variable in the runspace
+            //    this.powerShell.Commands.Clear();
+            //    this.powerShell
+            //        .AddCommand("Set-Variable")
+            //        .AddParameter("Name", "profile")
+            //        .AddParameter("Value", profile)
+            //        .AddParameter("Option", "None");
+            //    this.powerShell.Invoke();
+            //    this.powerShell.Commands.Clear();
+            //}
+
+            ///// <summary>
+            ///// Loads PowerShell profiles for the host from the specified
+            ///// profile locations.  Only the profile paths which exist are
+            ///// loaded.
+            ///// </summary>
+            ///// <returns>A Task that can be awaited for completion.</returns>
+            //public async Task LoadHostProfiles()
+            //{
+            //    if (this.profilePaths != null)
+            //    {
+            //        // Load any of the profile paths that exist
+            //        PSCommand command = null;
+            //        foreach (var profilePath in this.profilePaths.GetLoadableProfilePaths())
+            //        {
+            //            command = new PSCommand();
+            //            command.AddCommand(profilePath, false);
+            //            await this.ExecuteCommand(command);
+            //        }
+            //    }
+            //}
+        }
+
         /// <summary>
         /// Starts the language service with the specified TCP socket port.
         /// </summary>
         /// <param name="languageServicePort">The port number for the language service.</param>
-        /// <param name="profilePaths">The object containing the profile paths to load for this session.</param>
-        public void StartLanguageService(int languageServicePort, ProfilePaths profilePaths)
+        private async Task StartLanguageService(int languageServicePort)
         {
+            await this.editorSession.StartSession(this.sessionRunspace);
+
+            // TODO: Establish profile variable!
+
             this.languageServer =
                 new LanguageServer(
-                    hostDetails,
-                    profilePaths,
+                    this.editorSession,
                     new TcpSocketServerChannel(languageServicePort));
 
-            this.languageServer.Start().Wait();
+            await this.languageServer.Start();
 
             Logger.Write(
                 LogLevel.Normal,
                 string.Format(
                     "Language service started, listening on port {0}",
                     languageServicePort));
+
+            this.OnInitialized();
         }
 
         /// <summary>
         /// Starts the debug service with the specified TCP socket port.
         /// </summary>
         /// <param name="debugServicePort">The port number for the debug service.</param>
-        public void StartDebugService(int debugServicePort, ProfilePaths profilePaths)
+        private void StartDebugService(int debugServicePort)
         {
             this.debugAdapter =
                 new DebugAdapter(
-                    hostDetails,
-                    profilePaths,
+                    this.editorSession,
                     new TcpSocketServerChannel(debugServicePort));
 
             this.debugAdapter.SessionEnded +=
@@ -173,7 +301,7 @@ namespace Microsoft.PowerShell.EditorServices.Host
                         LogLevel.Normal,
                         "Previous debug session ended, restarting debug service...");
 
-                    this.StartDebugService(debugServicePort, profilePaths);
+                    this.StartDebugService(debugServicePort);
                 };
 
             this.debugAdapter.Start().Wait();
@@ -215,13 +343,9 @@ namespace Microsoft.PowerShell.EditorServices.Host
             }
         }
 
-        #endregion
-
-        #region Private Methods
-
 #if !NanoServer
         static void CurrentDomain_UnhandledException(
-            object sender, 
+            object sender,
             UnhandledExceptionEventArgs e)
         {
             // Log the exception

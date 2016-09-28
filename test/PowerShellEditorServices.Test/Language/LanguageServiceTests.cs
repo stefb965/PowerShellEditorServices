@@ -10,36 +10,40 @@ using Microsoft.PowerShell.EditorServices.Test.Shared.ParameterHint;
 using Microsoft.PowerShell.EditorServices.Test.Shared.References;
 using Microsoft.PowerShell.EditorServices.Test.Shared.SymbolDetails;
 using Microsoft.PowerShell.EditorServices.Test.Shared.Symbols;
-using Microsoft.Win32;
-using System;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management.Automation.Runspaces;
-using System.Threading;
 using System.Threading.Tasks;
-using System.Xml.Linq;
 using Xunit;
 
 namespace Microsoft.PowerShell.EditorServices.Test.Language
 {
-    public class LanguageServiceTests : IDisposable
+    public class LanguageServiceTests : IAsyncLifetime
     {
+        private Runspace runspace;
         private Workspace workspace;
         private LanguageService languageService;
         private PowerShellContext powerShellContext;
-       
 
-        public LanguageServiceTests()
+        public async Task InitializeAsync()
         {
-            this.powerShellContext = new PowerShellContext();
+            this.runspace = 
+                RunspaceFactory.CreateRunspace(
+                    InitialSessionState.CreateDefault2());
+
+            this.runspace.Open();
+
+            this.powerShellContext = new PowerShellContext(this.runspace);
+            await this.powerShellContext.Initialize();
+
             this.workspace = new Workspace(this.powerShellContext.PowerShellVersion);
             this.languageService = new LanguageService(this.powerShellContext);
         }
 
-        public void Dispose()
+        public async Task DisposeAsync()
         {
             this.powerShellContext.Dispose();
+            this.runspace.Dispose();
         }
 
         [Fact]
@@ -386,5 +390,6 @@ namespace Microsoft.PowerShell.EditorServices.Test.Language
                 this.languageService.FindSymbolsInFile(
                     GetScriptFile(scriptRegion));
         }
+
     }
 }

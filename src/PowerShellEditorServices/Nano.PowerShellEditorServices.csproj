@@ -56,6 +56,7 @@
     <Compile Include="Debugging\VariableDetailsBase.cs" />
     <Compile Include="Debugging\VariableScope.cs" />
     <Compile Include="Debugging\VariableContainerDetails.cs" />
+    <Compile Include="Debugging\InvalidPowerShellExpressionException.cs" />
     <Compile Include="Extensions\EditorContext.cs" />
     <Compile Include="Extensions\EditorObject.cs" />
     <Compile Include="Extensions\EditorWorkspace.cs" />
@@ -98,7 +99,6 @@
     <Compile Include="Session\PowerShellContextState.cs" />
     <Compile Include="Session\ProfilePaths.cs" />
     <Compile Include="Session\ProgressDetails.cs" />
-    <Compile Include="Session\RunspaceHandle.cs" />
     <Compile Include="Session\SessionPSHost.cs" />
     <Compile Include="Session\SessionPSHostRawUserInterface.cs" />
     <Compile Include="Session\SessionPSHostUserInterface.cs" />
@@ -159,6 +159,7 @@
     <Compile Include="..\PowerShellEditorServices.Protocol\DebugAdapter\ScopesRequest.cs" />
     <Compile Include="..\PowerShellEditorServices.Protocol\DebugAdapter\SetBreakpointsRequest.cs" />
     <Compile Include="..\PowerShellEditorServices.Protocol\DebugAdapter\SetExceptionBreakpointsRequest.cs" />
+    <Compile Include="..\PowerShellEditorServices.Protocol\DebugAdapter\SetVariableRequest.cs" />
     <Compile Include="..\PowerShellEditorServices.Protocol\DebugAdapter\Source.cs" />
     <Compile Include="..\PowerShellEditorServices.Protocol\DebugAdapter\SourceRequest.cs" />
     <Compile Include="..\PowerShellEditorServices.Protocol\DebugAdapter\StackFrame.cs" />

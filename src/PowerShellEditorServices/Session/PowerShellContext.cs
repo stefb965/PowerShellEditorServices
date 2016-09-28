@@ -3,7 +3,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 //
 
-using Microsoft.PowerShell.EditorServices.Console;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Collections;
@@ -20,10 +19,12 @@ namespace Microsoft.PowerShell.EditorServices
 {
     using Session;
     using System.Management.Automation;
+    using System.Management.Automation.Host;
     using System.Management.Automation.Runspaces;
     using System.Reflection;
 
     /// <summary>
+    /// TODO: This should be rewritten!
     /// Manages the lifetime and usage of a PowerShell session.
     /// Handles nested PowerShell prompts and also manages execution of 
     /// commands whether inside or outside of the debugger.
@@ -32,23 +33,21 @@ namespace Microsoft.PowerShell.EditorServices
     {
         #region Fields
 
-        private PowerShell powerShell;
-        private IConsoleHost consoleHost;
-        private bool ownsInitialRunspace;
+        private bool isRunspaceDebuggable;
         private Runspace initialRunspace;
         private Runspace currentRunspace;
-        private ProfilePaths profilePaths;
-        private ConsoleServicePSHost psHost;
-        private InitialSessionState initialSessionState;
         private IVersionSpecificOperations versionSpecificOperations;
         private int pipelineThreadId;
 
-        private TaskCompletionSource<DebuggerResumeAction> debuggerStoppedTask;
+        private bool isDebuggerStopped;
         private TaskCompletionSource<IPipelineExecutionRequest> pipelineExecutionTask;
         private TaskCompletionSource<IPipelineExecutionRequest> pipelineResultTask;
 
-        private object runspaceMutex = new object();
-        private AsyncQueue<RunspaceHandle> runspaceWaitQueue = new AsyncQueue<RunspaceHandle>();
+        private Task executionQueueTask;
+        private CancellationTokenSource executionQueueCancellationToken;
+
+        // TODO: Alias this type?
+        private AsyncQueue<Tuple<IExecutionRequest, TaskCompletionSource<bool>>> executionRequestQueue = new AsyncQueue<Tuple<IExecutionRequest, TaskCompletionSource<bool>>>();
 
         #endregion
 
@@ -62,7 +61,7 @@ namespace Microsoft.PowerShell.EditorServices
         {
             get
             {
-                return this.debuggerStoppedTask != null;
+                return this.isDebuggerStopped; //this.debuggerStoppedTask != null;
             }
         }
 
@@ -92,103 +91,180 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         /// <summary>
-        /// Gets or sets an IConsoleHost implementation for use in
-        /// writing output to the console.
+        /// Gets the PSHost exposed within the current runspace.
         /// </summary>
-        internal IConsoleHost ConsoleHost
-        {
-            get { return this.consoleHost; }
-            set
-            {
-                this.consoleHost = value;
-                this.psHost.ConsoleHost = value;
-            }
-        }
+        public PSHost RunspacePSHost { get; private set; }
 
         #endregion
 
         #region Constructors
 
         /// <summary>
-        /// Initializes a new instance of the PowerShellContext class and
-        /// opens a runspace to be used for the session.
+        /// Initializes a new instance of the PowerShellContext class using
+        /// an existing runspace for the session.
         /// </summary>
-        public PowerShellContext() : this((HostDetails)null, null)
+        /// <param name="initialRunspace">The initial runspace to use for this instance.</param>
+        public PowerShellContext(Runspace initialRunspace)
         {
+            Validate.IsNotNull("initialRunspace", initialRunspace);
+
+            // Watch for Runspace availability changes
+            this.initialRunspace = initialRunspace;
+            this.currentRunspace = initialRunspace;
         }
 
-        /// <summary>
-        /// Initializes a new instance of the PowerShellContext class and
-        /// opens a runspace to be used for the session.
-        /// </summary>
-        /// <param name="hostDetails">Provides details about the host application.</param>
-        /// <param name="profilePaths">An object containing the profile paths for the session.</param>
-        public PowerShellContext(HostDetails hostDetails, ProfilePaths profilePaths)
+        public async Task Initialize()
         {
-            hostDetails = hostDetails ?? HostDetails.Default;
+            this.SessionState = PowerShellContextState.NotStarted;
 
-            this.psHost = new ConsoleServicePSHost(hostDetails);
-            this.initialSessionState = InitialSessionState.CreateDefault2();
-
-            Runspace runspace = RunspaceFactory.CreateRunspace(psHost, this.initialSessionState);
-#if !NanoServer
-            runspace.ApartmentState = ApartmentState.STA;
-#endif
-            runspace.ThreadOptions = PSThreadOptions.ReuseThread;
-            runspace.Open();
-
-            this.ownsInitialRunspace = true;
-
-            this.Initialize(profilePaths, runspace);
-
-            // Use reflection to execute ConsoleVisibility.AlwaysCaptureApplicationIO = true;
-            Type consoleVisibilityType =
-                Type.GetType(
-                    "System.Management.Automation.ConsoleVisibility, System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35");
-
-            if (consoleVisibilityType != null)
+            this.currentRunspace = initialRunspace;
+            this.currentRunspace.AvailabilityChanged += this.currentRunspace_AvailabilityChanged;
+            if (this.currentRunspace.Debugger != null)
             {
-                PropertyInfo propertyInfo =
-                    consoleVisibilityType.GetProperty(
-                        "AlwaysCaptureApplicationIO",
-                        BindingFlags.Static | BindingFlags.Public);
+                this.ConfigureDebugger();
+                this.isRunspaceDebuggable = true;
 
-                if (propertyInfo != null)
+                Logger.Write(
+                    LogLevel.Verbose,
+                    "Runspace debugging is configured, events have been subscribed.");
+            }
+            else
+            {
+                Logger.Write(
+                    LogLevel.Warning,
+                    "Runspace is not configured for debugging, breakpoints will not work in this session.");
+            }
+
+            // Start a thread that processes the execution request queue
+            this.executionQueueCancellationToken = new CancellationTokenSource();
+            this.executionQueueTask =
+                Task.Factory.StartNew(
+                    () => 
+                    {
+                        try
+                        {
+                            this.ProcessExecutionRequestQueue(this.executionQueueCancellationToken.Token).GetAwaiter().GetResult();
+                        }
+                        catch (TaskCanceledException)
+                        {
+                            Logger.Write(
+                                LogLevel.Verbose,
+                                "PowerShellContext execution request queue thread is exiting");
+                        }
+                    },
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
+
+            await this.ConfigureRunspace();
+
+            this.SessionState = PowerShellContextState.Ready;
+        }
+
+        private void ConfigureDebugger()
+        {
+            this.currentRunspace.Debugger.BreakpointUpdated += OnBreakpointUpdated;
+
+            // Find the DebuggerStop event using reflection so that we can
+            // get access to its current list of registered handlers
+            Type debuggerType = this.currentRunspace.Debugger.GetType();
+            EventInfo eventInfo = debuggerType.GetEvent("DebuggerStop");
+            FieldInfo eventField =
+                eventInfo.DeclaringType.GetField(
+                    "DebuggerStop",
+                    BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+
+            EventHandler<DebuggerStopEventArgs> eventObject =
+                (EventHandler<DebuggerStopEventArgs>)eventField.GetValue(
+                    this.currentRunspace.Debugger);
+
+            Delegate[] originalHandlerList = new Delegate[0];
+            if (eventObject != null)
+            {
+                // Temporarily remove the current handlers
+                eventObject.GetInvocationList();
+                foreach (var handler in originalHandlerList)
                 {
-                    propertyInfo.SetValue(null, true);
+                    eventInfo.RemoveEventHandler(this.currentRunspace.Debugger, handler);
+                }
+            }
+
+            // Add our OnDebuggerStop method as a handler
+            eventInfo.AddEventHandler(
+                this.currentRunspace.Debugger,
+                (EventHandler<DebuggerStopEventArgs>)this.OnDebuggerStop);
+
+            // Add back the existing handlers
+            foreach (var handler in originalHandlerList)
+            {
+                eventInfo.AddEventHandler(this.currentRunspace.Debugger, handler);
+            }
+
+            // Add a final handler so we know when the debugger has resumed execution
+            this.currentRunspace.Debugger.DebuggerStop +=
+                (obj, args) =>
+                {
+                    // At this point the debugger must have resumed
+                    this.isDebuggerStopped = false;
+                };
+        }
+
+        private async Task ProcessExecutionRequestQueue(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                Tuple<IExecutionRequest, TaskCompletionSource<bool>> executionDetails = await this.executionRequestQueue.DequeueAsync(cancellationToken);
+
+                // Try to execute the task until it succeeds or is cancelled
+                while (!executionDetails.Item2.Task.IsCanceled)
+                {
+                    // TODO: Should there be an ExecutionResult or something?
+                    try
+                    {
+                        await executionDetails.Item1.Execute(this.currentRunspace);
+                        executionDetails.Item2.TrySetResult(true);
+
+                        // Listen for the next task
+                        break;
+                    }
+                    catch (PSInvalidOperationException e)
+                    {
+                        // TODO: This NanoServer check is likely not needed when compiling against latest CoreCLR.
+#if !NanoServer
+                        // TODO: Does this work across PowerShell versions?
+                        if (e.TargetSite.Name.StartsWith("DoConcurrentCheck"))
+                        {
+#endif
+                            Logger.Write(LogLevel.Verbose, "Runspace was busy when executing, trying again soon...");
+
+                            await Task.Delay(250);
+#if !NanoServer
+                        }
+                        else
+                        {
+                            Logger.Write(LogLevel.Verbose, $"Different kind of message... {e.TargetSite.Name}\r\n\r\n{e.Message}");
+                        }
+#endif
+                    }
                 }
             }
         }
 
-        /// <summary>
-        /// Initializes a new instance of the PowerShellContext class using
-        /// an existing runspace for the session.
-        /// </summary>
-        /// <param name="profilePaths">An object containing the profile paths for the session.</param>
-        /// <param name="initialRunspace">The initial runspace to use for this instance.</param>
-        public PowerShellContext(ProfilePaths profilePaths, Runspace initialRunspace)
+        private async Task QueueExecutionRequest(IExecutionRequest executionRequest)
         {
-            this.Initialize(profilePaths, initialRunspace);
+            TaskCompletionSource<bool> taskCompletionSource = new TaskCompletionSource<bool>();
+
+            await this.executionRequestQueue.EnqueueAsync(
+                Tuple.Create(executionRequest, taskCompletionSource));
+
+            // Wait for the execution task to complete
+            await taskCompletionSource.Task;
         }
 
-        private void Initialize(ProfilePaths profilePaths, Runspace initialRunspace)
+        private async Task ConfigureRunspace()
         {
-            Validate.IsNotNull("initialRunspace", initialRunspace);
-
-            this.SessionState = PowerShellContextState.NotStarted;
-
-            this.initialRunspace = initialRunspace;
-            this.currentRunspace = initialRunspace;
-            this.psHost.Runspace = initialRunspace;
-
-            this.currentRunspace.Debugger.BreakpointUpdated += OnBreakpointUpdated;
-            this.currentRunspace.Debugger.DebuggerStop += OnDebuggerStop;
-
-            this.powerShell = PowerShell.Create();
-            this.powerShell.Runspace = this.currentRunspace;
-
             // Get the PowerShell runtime version
-            Tuple<Version, string> versionEditionTuple = GetPowerShellVersion();
+            Tuple<Version, string> versionEditionTuple = await GetPowerShellVersion();
             this.PowerShellVersion = versionEditionTuple.Item1;
             this.PowerShellEdition = versionEditionTuple.Item2;
 
@@ -219,41 +295,55 @@ namespace Microsoft.PowerShell.EditorServices
                     PowerShellVersion.ToString());
             }
 
+            // Get the PSHost for the runspace
+            this.RunspacePSHost = await GetHostVariable();
+
             if (this.PowerShellEdition != "Linux")
             {
                 // TODO: Should this be configurable?
-                this.SetExecutionPolicy(ExecutionPolicy.RemoteSigned);
+                await this.SetExecutionPolicy(ExecutionPolicy.RemoteSigned);
             }
-
-            // Configure the runspace's debugger
-            this.versionSpecificOperations.ConfigureDebugger(
-                this.currentRunspace);
-
-            // Set the $profile variable in the runspace
-            this.profilePaths = profilePaths;
-            if (this.profilePaths != null)
-            {
-                this.SetProfileVariableInCurrentRunspace(profilePaths);
-            }
-
-            // Now that initialization is complete we can watch for InvocationStateChanged
-            this.powerShell.InvocationStateChanged += powerShell_InvocationStateChanged;
-
-            this.SessionState = PowerShellContextState.Ready;
-
-            // Now that the runspace is ready, enqueue it for first use
-            RunspaceHandle runspaceHandle = new RunspaceHandle(this.currentRunspace, this);
-            this.runspaceWaitQueue.EnqueueAsync(runspaceHandle).Wait();
         }
 
-        private Tuple<Version, string> GetPowerShellVersion()
+        private async Task<PSHost> GetHostVariable()
+        {
+            PSHost host = null;
+
+            try
+            {
+                host =
+                    await this.ExecuteWithRunspace(
+                        runspace =>
+                        {
+                            return runspace.SessionStateProxy.GetVariable("host") as PSHost;
+                        });
+            }
+            catch (Exception ex)
+            {
+                Logger.Write(
+                    LogLevel.Warning,
+                    $"Failed access $host variable.\r\n\r\n" +
+                    $"Exception '{ex.GetType().Name}': {ex.Message}\r\n");
+            }
+
+            return host;
+        }
+
+        private async Task<Tuple<Version, string>> GetPowerShellVersion()
         {
             Version powerShellVersion = new Version(5, 0);
             string powerShellEdition = "Desktop";
 
             try
             {
-                var psVersionTable = this.currentRunspace.SessionStateProxy.GetVariable("PSVersionTable") as Hashtable;
+                PSObject result =
+                    await this.ExecuteWithRunspace(
+                        runspace =>
+                        {
+                            return runspace.SessionStateProxy.GetVariable("PSVersionTable") as Hashtable;
+                        });
+                
+                var psVersionTable = result.BaseObject as Hashtable;
                 if (psVersionTable != null)
                 {
                     var version = psVersionTable["PSVersion"] as Version;
@@ -271,7 +361,11 @@ namespace Microsoft.PowerShell.EditorServices
             }
             catch (Exception ex)
             {
-                Logger.Write(LogLevel.Warning, "Failed to look up PowerShell version. Defaulting to version 5. " + ex.Message);
+
+                Logger.Write(
+                    LogLevel.Warning,
+                    $"Failed to look up PowerShell version. Defaulting to version 5.\r\n\r\n" +
+                    $"Exception '{ex.GetType().Name}': {ex.Message}\r\n");
             }
 
             return new Tuple<Version, string>(powerShellVersion, powerShellEdition);
@@ -281,27 +375,42 @@ namespace Microsoft.PowerShell.EditorServices
 
         #region Public Methods
 
-        /// <summary>
-        /// Gets a RunspaceHandle for the session's runspace.  This
-        /// handle is used to gain temporary ownership of the runspace
-        /// so that commands can be executed against it directly.
-        /// </summary>
-        /// <returns>A RunspaceHandle instance that gives access to the session's runspace.</returns>
-        public Task<RunspaceHandle> GetRunspaceHandle()
+        private void currentRunspace_AvailabilityChanged(object sender, RunspaceAvailabilityEventArgs e)
         {
-            return this.GetRunspaceHandle(CancellationToken.None);
+            // Log availability changes to help debug runspace synchronization problems
+            Logger.Write(
+                LogLevel.Verbose,
+                $"RunspaceAvailability changed: {this.currentRunspace.RunspaceAvailability}");
         }
 
-        /// <summary>
-        /// Gets a RunspaceHandle for the session's runspace.  This
-        /// handle is used to gain temporary ownership of the runspace
-        /// so that commands can be executed against it directly.
-        /// </summary>
-        /// <param name="cancellationToken">A CancellationToken that can be used to cancel the request.</param>
-        /// <returns>A RunspaceHandle instance that gives access to the session's runspace.</returns>
-        public Task<RunspaceHandle> GetRunspaceHandle(CancellationToken cancellationToken)
+        public Task<TResult> ExecuteWithRunspace<TResult>(Func<Runspace, TResult> runspaceFunc)
         {
-            return this.runspaceWaitQueue.DequeueAsync(cancellationToken);
+            return this.ExecuteWithRunspace(
+                runspaceFunc,
+                CancellationToken.None);
+        }
+
+        public async Task<TResult> ExecuteWithRunspace<TResult>(
+            Func<Runspace, TResult> runspaceFunc,
+            CancellationToken cancellationToken)
+        {
+            var executionRequest = new RunspaceExecutionRequest<TResult>(runspaceFunc);
+            await this.QueueExecutionRequest(executionRequest);
+
+            return executionRequest.Result;
+        }
+
+        public Task ExecuteWithRunspace(Action<Runspace> runspaceAction)
+        {
+            return this.ExecuteWithRunspace(runspaceAction, CancellationToken.None);
+        }
+
+        public async Task ExecuteWithRunspace(
+            Action<Runspace> runspaceAction,
+            CancellationToken cancellationToken)
+        {
+            var executionRequest = new RunspaceExecutionRequest(runspaceAction);
+            await this.QueueExecutionRequest(executionRequest);
         }
 
         /// <summary>
@@ -320,12 +429,12 @@ namespace Microsoft.PowerShell.EditorServices
         /// An awaitable Task which will provide results once the command
         /// execution completes.
         /// </returns>
-        public async Task<IEnumerable<TResult>> ExecuteCommand<TResult>(
+        public Task<IEnumerable<TResult>> ExecuteCommand<TResult>(
             PSCommand psCommand,
             bool sendOutputToHost = false,
             bool sendErrorToHost = true)
         {
-            return await ExecuteCommand<TResult>(psCommand, null, sendOutputToHost, sendErrorToHost);
+            return ExecuteCommand<TResult>(psCommand, null, sendOutputToHost, sendErrorToHost);
         }
 
         /// <summary>
@@ -352,52 +461,38 @@ namespace Microsoft.PowerShell.EditorServices
             bool sendOutputToHost = false,
             bool sendErrorToHost = true)
         {
-            RunspaceHandle runspaceHandle = null;
             IEnumerable<TResult> executionResult = Enumerable.Empty<TResult>();
 
-            // If the debugger is active and the caller isn't on the pipeline 
-            // thread, send the command over to that thread to be executed.
-            if (Thread.CurrentThread.ManagedThreadId != this.pipelineThreadId &&
-                this.pipelineExecutionTask != null)
+            // If the PowerShellContext is not yet initialized, throw an exception
+            if (this.SessionState == PowerShellContextState.Unknown)
             {
-                Logger.Write(LogLevel.Verbose, "Passing command execution to pipeline thread.");
-
-                PipelineExecutionRequest<TResult> executionRequest =
-                    new PipelineExecutionRequest<TResult>(
-                        this, psCommand, errorMessages, sendOutputToHost);
-
-                // Send the pipeline execution request to the pipeline thread
-                this.pipelineResultTask = new TaskCompletionSource<IPipelineExecutionRequest>();
-                this.pipelineExecutionTask.SetResult(executionRequest);
-
-                await this.pipelineResultTask.Task;
-                return executionRequest.Results;
+                throw new InvalidOperationException("The PowerShellContext has not yet been initialized");
             }
-            else
+
+            try
             {
-                try
+                // Instruct PowerShell to send output and errors to the host
+                if (sendOutputToHost)
                 {
-                    // Instruct PowerShell to send output and errors to the host
-                    if (sendOutputToHost)
+                    psCommand.Commands[0].MergeMyResults(
+                        PipelineResultTypes.Error,
+                        PipelineResultTypes.Output);
+
+                    psCommand.Commands.Add(
+                        this.GetOutputCommand(
+                            endOfStatement: false));
+                }
+
+                if (this.currentRunspace.RunspaceAvailability == RunspaceAvailability.AvailableForNestedCommand)
+                {
+                    Logger.Write(
+                        LogLevel.Verbose,
+                        string.Format(
+                            "Attempting to execute nested pipeline command(s):\r\n\r\n{0}",
+                            GetStringForPSCommand(psCommand)));
+
+                    if (this.isDebuggerStopped)
                     {
-                        psCommand.Commands[0].MergeMyResults(
-                            PipelineResultTypes.Error,
-                            PipelineResultTypes.Output);
-
-                        psCommand.Commands.Add(
-                            this.GetOutputCommand(
-                                endOfStatement: false));
-                    }
-
-                    if (this.currentRunspace.RunspaceAvailability == RunspaceAvailability.AvailableForNestedCommand ||
-                        this.debuggerStoppedTask != null)
-                    {
-                        Logger.Write(
-                            LogLevel.Verbose,
-                            string.Format(
-                                "Attempting to execute nested pipeline command(s):\r\n\r\n{0}",
-                                GetStringForPSCommand(psCommand)));
-
                         executionResult =
                             this.ExecuteCommandInDebugger<TResult>(
                                 psCommand,
@@ -405,91 +500,31 @@ namespace Microsoft.PowerShell.EditorServices
                     }
                     else
                     {
+                        // TODO: Execute in the pipeline
                         Logger.Write(
-                            LogLevel.Verbose,
-                            string.Format(
-                                "Attempting to execute command(s):\r\n\r\n{0}",
-                                GetStringForPSCommand(psCommand)));
-
-                        // Set the runspace
-                        runspaceHandle = await this.GetRunspaceHandle();
-                        if (runspaceHandle.Runspace.RunspaceAvailability != RunspaceAvailability.AvailableForNestedCommand)
-                        {
-                            this.powerShell.Runspace = runspaceHandle.Runspace;
-                        }
-
-                        // Invoke the pipeline on a background thread
-                        // TODO: Use built-in async invocation!
-                        executionResult =
-                            await Task.Factory.StartNew<IEnumerable<TResult>>(
-                                () =>
-                                {
-                                    this.powerShell.Commands = psCommand;
-                                    Collection<TResult> result = this.powerShell.Invoke<TResult>();
-                                    return result;
-                                },
-                                CancellationToken.None, // Might need a cancellation token
-                                TaskCreationOptions.None,
-                                TaskScheduler.Default
-                            );
-
-                        if (this.powerShell.HadErrors)
-                        {
-                            string errorMessage = "Execution completed with errors:\r\n\r\n";
-
-                            foreach (var error in this.powerShell.Streams.Error)
-                            {
-                                errorMessage += error.ToString() + "\r\n";
-                            }
-
-                            errorMessages?.Append(errorMessage);
-                            Logger.Write(LogLevel.Error, errorMessage);
-                        }
-                        else
-                        {
-                            Logger.Write(
-                                LogLevel.Verbose,
-                                "Execution completed successfully.");
-                        }
-
-                        return executionResult;
+                            LogLevel.Error,
+                            "Requested execute while AvailableForNestedCommand, did nothing!");
                     }
                 }
-                catch (RuntimeException e)
+                else
                 {
-                    Logger.Write(
-                        LogLevel.Error,
-                        "Runtime exception occurred while executing command:\r\n\r\n" + e.ToString());
-
-                    errorMessages?.Append(e.Message);
-
-                    if (sendErrorToHost)
-                    {
-                        // Write the error to the host
-                        this.WriteExceptionToHost(e);
-                    }
+                    CommandExecutionRequest<TResult> executionRequest = new CommandExecutionRequest<TResult>(psCommand);
+                    await this.QueueExecutionRequest(executionRequest);
+                    executionResult = executionRequest.Result;
                 }
-                finally
-                {
-                    // Get the new prompt before releasing the runspace handle
-                    if (sendOutputToHost)
-                    {
-                        // Write the prompt
-                        if (runspaceHandle != null)
-                        {
-                            this.WritePromptWithRunspace(runspaceHandle.Runspace);
-                        }
-                        else
-                        {
-                            this.WritePromptWithNestedPipeline();
-                        }
-                    }
+            }
+            catch (RuntimeException e)
+            {
+                Logger.Write(
+                    LogLevel.Error,
+                    "Runtime exception occurred while executing command:\r\n\r\n" + e.ToString());
 
-                    // Dispose of the execution context
-                    if (runspaceHandle != null)
-                    {
-                        runspaceHandle.Dispose();
-                    }
+                errorMessages?.Append(e.Message);
+
+                if (sendErrorToHost)
+                {
+                    // Write the error to the host
+                    this.WriteExceptionToHost(e);
                 }
             }
 
@@ -552,7 +587,7 @@ namespace Microsoft.PowerShell.EditorServices
         /// <param name="scriptPath">The path to the script file to execute.</param>
         /// <param name="arguments">Arguments to pass to the script.</param>
         /// <returns>A Task that can be awaited for completion.</returns>
-        public async Task ExecuteScriptAtPath(string scriptPath, string arguments = null)
+        public Task ExecuteScriptAtPath(string scriptPath, string arguments = null)
         {
             PSCommand command = new PSCommand();
 
@@ -571,28 +606,7 @@ namespace Microsoft.PowerShell.EditorServices
                 command.AddCommand(scriptPath);
             }
 
-            await this.ExecuteCommand<object>(command, true);
-        }
-
-        /// <summary>
-        /// Loads PowerShell profiles for the host from the specified
-        /// profile locations.  Only the profile paths which exist are
-        /// loaded.
-        /// </summary>
-        /// <returns>A Task that can be awaited for completion.</returns>
-        public async Task LoadHostProfiles()
-        {
-            if (this.profilePaths != null)
-            {
-                // Load any of the profile paths that exist
-                PSCommand command = null;
-                foreach (var profilePath in this.profilePaths.GetLoadableProfilePaths())
-                {
-                    command = new PSCommand();
-                    command.AddCommand(profilePath, false);
-                    await this.ExecuteCommand(command);
-                }
-            }
+            return this.ExecuteCommand<object>(command, true);
         }
 
         /// <summary>
@@ -606,7 +620,7 @@ namespace Microsoft.PowerShell.EditorServices
             {
                 Logger.Write(LogLevel.Verbose, "Execution abort requested...");
 
-                this.powerShell.BeginStop(null, null);
+                //this.powerShell.BeginStop(null, null);
                 this.SessionState = PowerShellContextState.Aborting;
 
                 if (this.IsDebuggerStopped)
@@ -639,16 +653,18 @@ namespace Microsoft.PowerShell.EditorServices
 
         internal void ResumeDebugger(DebuggerResumeAction resumeAction)
         {
-            if (this.debuggerStoppedTask != null)
-            {
-                // Set the result so that the execution thread resumes.
-                // The execution thread will clean up the task.
-                this.debuggerStoppedTask.SetResult(resumeAction);
-            }
-            else
-            {
-                // TODO: Throw InvalidOperationException?
-            }
+            // TODO: What do we do here?  Send command somehow?
+
+            //if (this.debuggerStoppedTask != null)
+            //{
+            //    // Set the result so that the execution thread resumes.
+            //    // The execution thread will clean up the task.
+            //    this.debuggerStoppedTask.SetResult(resumeAction);
+            //}
+            //else
+            //{
+            //    // TODO: Throw InvalidOperationException?
+            //}
         }
 
         /// <summary>
@@ -657,6 +673,10 @@ namespace Microsoft.PowerShell.EditorServices
         /// </summary>
         public void Dispose()
         {
+            // TODO: I'm skeptical of the necessity of this.  Should the host take care of
+            // terminating the running command?  Maybe we should terminate our own running
+            // command if there is one...
+
             // Do we need to abort a running execution?
             if (this.SessionState == PowerShellContextState.Running ||
                 this.IsDebuggerStopped)
@@ -666,38 +686,8 @@ namespace Microsoft.PowerShell.EditorServices
 
             this.SessionState = PowerShellContextState.Disposed;
 
-            if (this.powerShell != null)
-            {
-                this.powerShell.InvocationStateChanged -= this.powerShell_InvocationStateChanged;
-                this.powerShell.Dispose();
-                this.powerShell = null;
-            }
-
-            if (this.ownsInitialRunspace && this.initialRunspace != null)
-            {
-                // TODO: Detach from events
-                this.initialRunspace.Close();
-                this.initialRunspace.Dispose();
-                this.initialRunspace = null;
-            }
-        }
-
-        internal void ReleaseRunspaceHandle(RunspaceHandle runspaceHandle)
-        {
-            Validate.IsNotNull("runspaceHandle", runspaceHandle);
-
-            if (this.runspaceWaitQueue.IsEmpty)
-            {
-                var newRunspaceHandle = new RunspaceHandle(this.currentRunspace, this);
-                this.runspaceWaitQueue.EnqueueAsync(newRunspaceHandle).Wait();
-            }
-            else
-            {
-                // Write the situation to the log since this shouldn't happen
-                Logger.Write(
-                    LogLevel.Error,
-                    "The PowerShellContext.runspaceWaitQueue has more than one item");
-            }
+            // Kill the thread that's processing execution requests
+            this.executionQueueCancellationToken.Cancel();
         }
 
         /// <summary>
@@ -749,26 +739,84 @@ namespace Microsoft.PowerShell.EditorServices
 
         #region Events
 
-        /// <summary>
-        /// Raised when the state of the session has changed.
-        /// </summary>
-        public event EventHandler<SessionStateChangedEventArgs> SessionStateChanged;
+        // NOTE: This event is 'internal' because the DebugService provides
+        //       the publicly consumable event.
+        internal event EventHandler<DebuggerStopEventArgs> DebuggerStop;
 
-        private void OnSessionStateChanged(object sender, SessionStateChangedEventArgs e)
+        private async void OnDebuggerStop(object sender, DebuggerStopEventArgs e)
         {
-            Logger.Write(
-                LogLevel.Verbose,
-                string.Format(
-                    "Session state changed --\r\n\r\n    Old state: {0}\r\n    New state: {1}\r\n    Result: {2}",
-                    this.SessionState.ToString(),
-                    e.NewSessionState.ToString(),
-                    e.ExecutionResult));
+            Logger.Write(LogLevel.Verbose, "Debugger stopped execution.");
 
-            this.SessionState = e.NewSessionState;
+            this.isDebuggerStopped = true;
 
-            if (this.SessionStateChanged != null)
+            //// Set the task so a result can be set
+            //this.debuggerStoppedTask =
+            //     new TaskCompletionSource<DebuggerResumeAction>();
+
+            //// Save the pipeline thread ID and create the pipeline execution task
+            //this.pipelineThreadId = Thread.CurrentThread.ManagedThreadId;
+            //this.pipelineExecutionTask = new TaskCompletionSource<IPipelineExecutionRequest>();
+
+            // Raise the event for the debugger service
+            this.DebuggerStop?.Invoke(sender, e);
+
+            // NOTE: At this point we expect the host to handle the breakpoint
+            // actions subsequent prompt loop
+
+            //Logger.Write(LogLevel.Verbose, "Starting pipeline thread message loop...");
+
+            //while (true)
+            //{
+            //    int taskIndex =
+            //        Task.WaitAny(
+            //            this.debuggerStoppedTask.Task,
+            //            this.pipelineExecutionTask.Task);
+
+            //    if (taskIndex == 0)
+            //    {
+            //        // Write a new output line before continuing
+            //        // TODO: Re-enable this with fix for #133
+            //        //this.WriteOutput("", true);
+
+            //        e.ResumeAction = this.debuggerStoppedTask.Task.Result;
+            //        Logger.Write(LogLevel.Verbose, "Received debugger resume action " + e.ResumeAction.ToString());
+
+            //        break;
+            //    }
+            //    else if (taskIndex == 1)
+            //    {
+            //        Logger.Write(LogLevel.Verbose, "Received pipeline thread execution request.");
+
+            //        IPipelineExecutionRequest executionRequest =
+            //            this.pipelineExecutionTask.Task.Result;
+
+            //        this.pipelineExecutionTask = new TaskCompletionSource<IPipelineExecutionRequest>();
+
+            //        executionRequest.Execute().Wait();
+
+            //        Logger.Write(LogLevel.Verbose, "Pipeline thread execution completed.");
+
+            //        this.pipelineResultTask.SetResult(executionRequest);
+            //    }
+            //    else
+            //    {
+            //        // TODO: How to handle this?
+            //    }
+            //}
+
+            //// Clear the task so that it won't be used again
+            //this.debuggerStoppedTask = null;
+        }
+
+        // NOTE: This event is 'internal' because the DebugService provides
+        //       the publicly consumable event.
+        internal event EventHandler<BreakpointUpdatedEventArgs> BreakpointUpdated;
+
+        private void OnBreakpointUpdated(object sender, BreakpointUpdatedEventArgs e)
+        {
+            if (this.BreakpointUpdated != null)
             {
-                this.SessionStateChanged(sender, e);
+                this.BreakpointUpdated(sender, e);
             }
         }
 
@@ -798,13 +846,13 @@ namespace Microsoft.PowerShell.EditorServices
             bool includeNewLine,
             OutputType outputType)
         {
-            if (this.ConsoleHost != null)
-            {
-                this.ConsoleHost.WriteOutput(
-                    outputString,
-                    includeNewLine,
-                    outputType);
-            }
+            //if (this.ConsoleHost != null)
+            //{
+            //    this.ConsoleHost.WriteOutput(
+            //        outputString,
+            //        includeNewLine,
+            //        outputType);
+            //}
         }
 
         private void WriteExceptionToHost(Exception e)
@@ -868,75 +916,15 @@ namespace Microsoft.PowerShell.EditorServices
 
         private void WriteError(string errorMessage)
         {
-            if (this.ConsoleHost != null)
-            {
-                this.ConsoleHost.WriteOutput(
-                    errorMessage,
-                    true,
-                    OutputType.Error,
-                    ConsoleColor.Red,
-                    ConsoleColor.Black);
-            }
-        }
-
-        void powerShell_InvocationStateChanged(object sender, PSInvocationStateChangedEventArgs e)
-        {
-            SessionStateChangedEventArgs eventArgs = TranslateInvocationStateInfo(e.InvocationStateInfo);
-            this.OnSessionStateChanged(this, eventArgs);
-        }
-
-        private static SessionStateChangedEventArgs TranslateInvocationStateInfo(PSInvocationStateInfo invocationState)
-        {
-            PowerShellContextState newState = PowerShellContextState.Unknown;
-            PowerShellExecutionResult executionResult = PowerShellExecutionResult.NotFinished;
-
-            switch (invocationState.State)
-            {
-                case PSInvocationState.NotStarted:
-                    newState = PowerShellContextState.NotStarted;
-                    break;
-
-                case PSInvocationState.Failed:
-                    newState = PowerShellContextState.Ready;
-                    executionResult = PowerShellExecutionResult.Failed;
-                    break;
-
-                case PSInvocationState.Disconnected:
-                    // TODO: Any extra work to do in this case?
-                    // TODO: Is this a unique state that can be re-connected?
-                    newState = PowerShellContextState.Disposed;
-                    executionResult = PowerShellExecutionResult.Stopped;
-                    break;
-
-                case PSInvocationState.Running:
-                    newState = PowerShellContextState.Running;
-                    break;
-
-                case PSInvocationState.Completed:
-                    newState = PowerShellContextState.Ready;
-                    executionResult = PowerShellExecutionResult.Completed;
-                    break;
-
-                case PSInvocationState.Stopping:
-                    // TODO: Collapse this so that the result shows that execution was aborted
-                    newState = PowerShellContextState.Aborting;
-                    break;
-
-                case PSInvocationState.Stopped:
-                    newState = PowerShellContextState.Ready;
-                    executionResult = PowerShellExecutionResult.Aborted;
-                    break;
-
-                default:
-                    newState = PowerShellContextState.Unknown;
-                    break;
-            }
-
-            return
-                new SessionStateChangedEventArgs(
-                    newState,
-                    executionResult,
-                    invocationState.Reason);
+            //if (this.ConsoleHost != null)
+            //{
+            //    this.ConsoleHost.WriteOutput(
+            //        errorMessage,
+            //        true,
+            //        OutputType.Error,
+            //        ConsoleColor.Red,
+            //        ConsoleColor.Black);
+            //}
         }
 
         private Command GetOutputCommand(bool endOfStatement)
@@ -969,18 +957,15 @@ namespace Microsoft.PowerShell.EditorServices
             return stringBuilder.ToString();
         }
         
-        private void SetExecutionPolicy(ExecutionPolicy desiredExecutionPolicy)
+        private async Task SetExecutionPolicy(ExecutionPolicy desiredExecutionPolicy)
         {
             var currentPolicy = ExecutionPolicy.Undefined;
 
             // Get the current execution policy so that we don't set it higher than it already is 
-            this.powerShell.Commands.AddCommand("Get-ExecutionPolicy");
-
-            var result = this.powerShell.Invoke<ExecutionPolicy>();
-            if (result.Count > 0)
-            {
-                currentPolicy = result.FirstOrDefault();
-            }
+            PSCommand psCommand = new PSCommand();
+            psCommand.AddCommand("Get-ExecutionPolicy");
+            var result = await this.ExecuteCommand<ExecutionPolicy>(psCommand);
+            currentPolicy = result.FirstOrDefault();
 
             if (desiredExecutionPolicy < currentPolicy ||
                 desiredExecutionPolicy == ExecutionPolicy.Bypass ||
@@ -993,15 +978,14 @@ namespace Microsoft.PowerShell.EditorServices
                         currentPolicy,
                         desiredExecutionPolicy));
 
-                this.powerShell.Commands.Clear();
-                this.powerShell
+                psCommand.Clear();
+                psCommand
                     .AddCommand("Set-ExecutionPolicy")
                     .AddParameter("ExecutionPolicy", desiredExecutionPolicy)
                     .AddParameter("Scope", ExecutionPolicyScope.Process)
                     .AddParameter("Force");
 
-                this.powerShell.Invoke();
-                this.powerShell.Commands.Clear();
+                await this.ExecuteCommand(psCommand);
 
                 // TODO: Ensure there were no errors?
             }
@@ -1054,16 +1038,17 @@ namespace Microsoft.PowerShell.EditorServices
 
         private void WritePromptWithRunspace(Runspace runspace)
         {
-            this.WritePromptToHost(
-                command =>
-                {
-                    this.powerShell.Commands = command;
+            //this.WritePromptToHost(
+            //    command =>
+            //    throw new NotImplementedException();
+            //    {
+            //        this.powerShell.Commands = command;
 
-                    return
-                        this.powerShell
-                            .Invoke<string>()
-                            .FirstOrDefault();
-                });
+            //        return
+            //            this.powerShell
+            //                .Invoke<string>()
+            //                .FirstOrDefault();
+            //    });
         }
 
         private void WritePromptWithNestedPipeline()
@@ -1086,146 +1071,112 @@ namespace Microsoft.PowerShell.EditorServices
             }
         }
 
-        private void SetProfileVariableInCurrentRunspace(ProfilePaths profilePaths)
-        {
-            // Create the $profile variable
-            PSObject profile = new PSObject(profilePaths.CurrentUserCurrentHost);
-
-            profile.Members.Add(
-                new PSNoteProperty(
-                    nameof(profilePaths.AllUsersAllHosts),
-                    profilePaths.AllUsersAllHosts));
-
-            profile.Members.Add(
-                new PSNoteProperty(
-                    nameof(profilePaths.AllUsersCurrentHost),
-                    profilePaths.AllUsersCurrentHost));
-
-            profile.Members.Add(
-                new PSNoteProperty(
-                    nameof(profilePaths.CurrentUserAllHosts),
-                    profilePaths.CurrentUserAllHosts));
-
-            profile.Members.Add(
-                new PSNoteProperty(
-                    nameof(profilePaths.CurrentUserCurrentHost),
-                    profilePaths.CurrentUserCurrentHost));
-
-            Logger.Write(
-                LogLevel.Verbose,
-                string.Format(
-                    "Setting $profile variable in runspace.  Current user host profile path: {0}",
-                    profilePaths.CurrentUserCurrentHost));
-
-            // Set the variable in the runspace
-            this.powerShell.Commands.Clear();
-            this.powerShell
-                .AddCommand("Set-Variable")
-                .AddParameter("Name", "profile")
-                .AddParameter("Value", profile)
-                .AddParameter("Option", "None");
-            this.powerShell.Invoke();
-            this.powerShell.Commands.Clear();
-        }
         
         #endregion
 
-        #region Events
-
-        // NOTE: This event is 'internal' because the DebugService provides
-        //       the publicly consumable event.
-        internal event EventHandler<DebuggerStopEventArgs> DebuggerStop;
-
-        private void OnDebuggerStop(object sender, DebuggerStopEventArgs e)
-        {
-            Logger.Write(LogLevel.Verbose, "Debugger stopped execution.");
-
-            // Set the task so a result can be set
-            this.debuggerStoppedTask =
-                new TaskCompletionSource<DebuggerResumeAction>();
-
-            // Save the pipeline thread ID and create the pipeline execution task
-            this.pipelineThreadId = Thread.CurrentThread.ManagedThreadId;
-            this.pipelineExecutionTask = new TaskCompletionSource<IPipelineExecutionRequest>();
-
-            // Update the session state
-            this.OnSessionStateChanged(
-                this,
-                new SessionStateChangedEventArgs(
-                    PowerShellContextState.Ready,
-                    PowerShellExecutionResult.Stopped,
-                    null));
-
-            // Write out the debugger prompt
-            // TODO: Eventually re-enable this and put it behind a setting, #133
-            //this.WritePromptWithNestedPipeline();
-
-            // Raise the event for the debugger service
-            if (this.DebuggerStop != null)
-            {
-                this.DebuggerStop(sender, e);
-            }
-
-            Logger.Write(LogLevel.Verbose, "Starting pipeline thread message loop...");
-
-            while (true)
-            {
-                int taskIndex =
-                    Task.WaitAny(
-                        this.debuggerStoppedTask.Task,
-                        this.pipelineExecutionTask.Task);
-
-                if (taskIndex == 0)
-                {
-                    // Write a new output line before continuing
-                    // TODO: Re-enable this with fix for #133
-                    //this.WriteOutput("", true);
-
-                    e.ResumeAction = this.debuggerStoppedTask.Task.Result;
-                    Logger.Write(LogLevel.Verbose, "Received debugger resume action " + e.ResumeAction.ToString());
-
-                    break;
-                }
-                else if (taskIndex == 1)
-                {
-                    Logger.Write(LogLevel.Verbose, "Received pipeline thread execution request.");
-
-                    IPipelineExecutionRequest executionRequest =
-                        this.pipelineExecutionTask.Task.Result;
-
-                    this.pipelineExecutionTask = new TaskCompletionSource<IPipelineExecutionRequest>();
-
-                    executionRequest.Execute().Wait();
-
-                    Logger.Write(LogLevel.Verbose, "Pipeline thread execution completed.");
-
-                    this.pipelineResultTask.SetResult(executionRequest);
-                }
-                else
-                {
-                    // TODO: How to handle this?
-                }
-            }
-
-            // Clear the task so that it won't be used again
-            this.debuggerStoppedTask = null;
-        }
-
-        // NOTE: This event is 'internal' because the DebugService provides
-        //       the publicly consumable event.
-        internal event EventHandler<BreakpointUpdatedEventArgs> BreakpointUpdated;
-
-        private void OnBreakpointUpdated(object sender, BreakpointUpdatedEventArgs e)
-        {
-            if (this.BreakpointUpdated != null)
-            {
-                this.BreakpointUpdated(sender, e);
-            }
-        }
-
-        #endregion
-
         #region Nested Classes
+
+        private interface IExecutionRequest
+        {
+            Task Execute(Runspace runspace);
+        }
+
+        private class RunspaceExecutionRequest : IExecutionRequest
+        {
+            private Action<Runspace> runspaceAction;
+
+            public RunspaceExecutionRequest(Action<Runspace> runspaceAction)
+            {
+                Validate.IsNotNull(nameof(runspaceAction), runspaceAction);
+
+                this.runspaceAction = runspaceAction;
+            }
+
+            public Task Execute(Runspace runspace)
+            {
+                this.runspaceAction(runspace);
+                return Task.FromResult(true);
+            }
+        }
+
+        private class RunspaceExecutionRequest<TResult> : IExecutionRequest
+        {
+            private Func<Runspace, TResult> runspaceFunc;
+
+            public TResult Result { get; private set; }
+
+            public RunspaceExecutionRequest(Func<Runspace, TResult> runspaceFunc)
+            {
+                Validate.IsNotNull(nameof(runspaceFunc), runspaceFunc);
+
+                this.runspaceFunc = runspaceFunc;
+            }
+
+            public Task Execute(Runspace runspace)
+            {
+                this.Result = this.runspaceFunc(runspace);
+                return Task.FromResult(true);
+            }
+        }
+
+        private class CommandExecutionRequest<TResult> : IExecutionRequest
+        {
+            private PSCommand psCommand;
+
+            public Collection<TResult> Result { get; private set; }
+
+            public CommandExecutionRequest(PSCommand psCommand)
+            {
+                Validate.IsNotNull(nameof(psCommand), psCommand);
+
+                this.psCommand = psCommand;
+            }
+
+            public async Task Execute(Runspace runspace)
+            {
+                Logger.Write(
+                    LogLevel.Verbose,
+                    string.Format(
+                        "Attempting to execute command(s):\r\n\r\n{0}",
+                        GetStringForPSCommand(psCommand)));
+
+                using (PowerShell powerShell = PowerShell.Create())
+                {
+                    powerShell.Runspace = runspace;
+                    powerShell.Commands = this.psCommand;
+                    this.Result =
+                        await Task.Factory.StartNew(
+                            () =>
+                            {
+                                powerShell.Commands = psCommand;
+                                Collection<TResult> result = powerShell.Invoke<TResult>();
+                                return result;
+                            },
+                            CancellationToken.None, // Might need a cancellation token
+                            TaskCreationOptions.AttachedToParent,
+                            TaskScheduler.Default
+                        );
+
+                    if (powerShell.HadErrors)
+                    {
+                        string errorMessage = "Execution completed with errors:\r\n\r\n";
+
+                        foreach (var error in powerShell.Streams.Error)
+                        {
+                            errorMessage += error.ToString() + "\r\n";
+                        }
+
+                        Logger.Write(LogLevel.Error, errorMessage);
+                    }
+                    else
+                    {
+                        Logger.Write(
+                            LogLevel.Verbose,
+                            "Execution completed successfully.");
+                    }
+                }
+            }
+        }
 
         private interface IPipelineExecutionRequest
         {

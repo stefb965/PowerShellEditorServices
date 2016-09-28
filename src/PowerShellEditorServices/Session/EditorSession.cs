@@ -8,6 +8,8 @@ using Microsoft.PowerShell.EditorServices.Extensions;
 using Microsoft.PowerShell.EditorServices.Session;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System.IO;
+using System.Management.Automation.Runspaces;
+using System.Threading.Tasks;
 
 namespace Microsoft.PowerShell.EditorServices
 {
@@ -62,41 +64,37 @@ namespace Microsoft.PowerShell.EditorServices
         /// Starts the session using the provided IConsoleHost implementation
         /// for the ConsoleService.
         /// </summary>
-        /// <param name="hostDetails">
-        /// Provides details about the host application.
-        /// </param>
-        /// <param name="profilePaths">
-        /// An object containing the profile paths for the session.
-        /// </param>
-        public void StartSession(HostDetails hostDetails, ProfilePaths profilePaths)
+        public async Task StartSession(Runspace runspace)
         {
-            // Initialize all services
-            this.PowerShellContext = new PowerShellContext(hostDetails, profilePaths);
-            this.LanguageService = new LanguageService(this.PowerShellContext);
-            this.DebugService = new DebugService(this.PowerShellContext);
-            this.ConsoleService = new ConsoleService(this.PowerShellContext);
-            this.ExtensionService = new ExtensionService(this.PowerShellContext);
+            this.PowerShellContext = new PowerShellContext(runspace);
+            await this.PowerShellContext.Initialize();
 
-            this.InstantiateAnalysisService();
-
-            // Create a workspace to contain open files
-            this.Workspace = new Workspace(this.PowerShellContext.PowerShellVersion);
+            this.InitializeServices(false);
         }
 
         /// <summary>
         /// Starts a debug-only session using the provided IConsoleHost implementation
         /// for the ConsoleService.
         /// </summary>
-        /// <param name="hostDetails">
-        /// Provides details about the host application.
-        /// </param>
-        /// <param name="profilePaths">
-        /// An object containing the profile paths for the session.
-        /// </param>
-        public void StartDebugSession(HostDetails hostDetails, ProfilePaths profilePaths)
+        public async Task StartDebugSession(Runspace runspace)
         {
-            // Initialize all services
-            this.PowerShellContext = new PowerShellContext(hostDetails, profilePaths);
+            this.PowerShellContext = new PowerShellContext(runspace);
+            await this.PowerShellContext.Initialize();
+
+            this.InitializeServices(false);
+        }
+
+        private void InitializeServices(bool debugOnly)
+        {
+            // Initialize all auxiliary services
+            if (!debugOnly)
+            {
+                this.LanguageService = new LanguageService(this.PowerShellContext);
+                this.ExtensionService = new ExtensionService(this.PowerShellContext);
+
+                this.InstantiateAnalysisService();
+            }
+
             this.DebugService = new DebugService(this.PowerShellContext);
             this.ConsoleService = new ConsoleService(this.PowerShellContext);
 
@@ -119,7 +117,7 @@ namespace Microsoft.PowerShell.EditorServices
                 // Script Analyzer binaries are not included.
                 try
                 {
-                    this.AnalysisService = new AnalysisService(this.PowerShellContext.ConsoleHost, settingsPath);
+                    this.AnalysisService = new AnalysisService(null, settingsPath);
                 }
                 catch (FileNotFoundException)
                 {

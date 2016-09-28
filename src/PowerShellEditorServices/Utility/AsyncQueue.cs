@@ -53,6 +53,7 @@ namespace Microsoft.PowerShell.EditorServices.Utility
         /// </param>
         public AsyncQueue(IEnumerable<T> initialItems)
         {
+            this.IsEmpty = !initialItems.Any();
             this.itemQueue = new Queue<T>(initialItems);
             this.requestQueue = new Queue<TaskCompletionSource<T>>();
         }
@@ -71,10 +72,9 @@ namespace Microsoft.PowerShell.EditorServices.Utility
         /// </returns>
         public async Task EnqueueAsync(T item)
         {
+            TaskCompletionSource<T> requestTaskSource = null;
             using (await queueLock.LockAsync())
             {
-                TaskCompletionSource<T> requestTaskSource = null;
-
                 // Are any requests waiting?
                 while (this.requestQueue.Count > 0)
                 {
@@ -82,15 +82,33 @@ namespace Microsoft.PowerShell.EditorServices.Utility
                     requestTaskSource = this.requestQueue.Dequeue();
                     if (!requestTaskSource.Task.IsCanceled)
                     {
-                        // Dispatch the item
-                        requestTaskSource.SetResult(item);
-                        return;
+                        // Break from the loop so that the task can be
+                        // completed outside of the lock
+                        break;
+                    }
+                    else
+                    {
+                        // Make sure this task doesn't get completed outside
+                        // of the loop
+                        requestTaskSource = null;
                     }
                 }
-                               
-                // No more requests waiting, queue the item for a later request
-                this.itemQueue.Enqueue(item);
-                this.IsEmpty = false;
+                
+                if (requestTaskSource == null)
+                {
+                    // No more requests waiting, queue the item for a later request
+                    this.itemQueue.Enqueue(item);
+                    this.IsEmpty = false;
+                }       
+            }
+
+            // Complete the task outside of the lock to avoid any deadlock
+            // situation if the completed task gets executed on the same thread
+            if (requestTaskSource != null)
+            {
+                // Dispatch the item
+                requestTaskSource.SetResult(item);
+                return;
             }
         }
 

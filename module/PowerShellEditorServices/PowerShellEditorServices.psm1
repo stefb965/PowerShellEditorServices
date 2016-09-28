@@ -6,7 +6,7 @@ else {
     Add-Type -Path "$PSScriptRoot/bin/Nano/Microsoft.PowerShell.EditorServices.Nano.dll"
 }
 
-function Start-EditorServicesHost {
+function New-EditorServicesHost {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
@@ -34,30 +34,18 @@ function Start-EditorServicesHost {
         [int]
         $DebugServicePort,
 
-        [ValidateNotNullOrEmpty()]
-        [string]
-        $BundledModulesPath,
-
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         $LogPath,
 
         [ValidateSet("Normal", "Verbose", "Error")]
-        $LogLevel = "Normal",
-
-        [switch]
-        $WaitForDebugger
+        $LogLevel = "Normal"
     )
 
     $editorServicesHost = $null
     $hostDetails = New-Object Microsoft.PowerShell.EditorServices.Session.HostDetails @($HostName, $HostProfileId, (New-Object System.Version @($HostVersion)))
 
     try {
-        $editorServicesHost =
-            New-Object Microsoft.PowerShell.EditorServices.Host.EditorServicesHost @(
-                $hostDetails,
-                $BundledModulesPath,
-                $WaitForDebugger.IsPresent)
 
         # Build the profile paths using the root paths of the current $profile variable
         $profilePaths = New-Object Microsoft.PowerShell.EditorServices.Session.ProfilePaths @(
@@ -65,9 +53,17 @@ function Start-EditorServicesHost {
             [System.IO.Path]::GetDirectoryName($profile.AllUsersAllHosts),
             [System.IO.Path]::GetDirectoryName($profile.CurrentUserAllHosts));
 
-        $editorServicesHost.StartLogging($LogPath, $LogLevel);
-        $editorServicesHost.StartLanguageService($LanguageServicePort, $profilePaths);
-        $editorServicesHost.StartDebugService($DebugServicePort, $profilePaths);
+		$hostConfiguration = New-Object Microsoft.PowerShell.EditorServices.Host.EditorServicesHostConfiguration @($hostDetails)
+		$hostConfiguration.LogFilePath = $LogPath
+		$hostConfiguration.LogLevel = $LogLevel
+		$hostConfiguration.ProfilePaths = $profilePaths
+		$hostConfiguration.LanguageServicePort = $LanguageServicePort
+		$hostConfiguration.DebugServicePort = $DebugServicePort
+
+        $editorServicesHost =
+            New-Object Microsoft.PowerShell.EditorServices.Host.EditorServicesHost @(
+                [Runspace]::DefaultRunspace,
+                $hostConfiguration)
     }
     catch {
         Write-Error "PowerShell Editor Services host initialization failed, terminating."

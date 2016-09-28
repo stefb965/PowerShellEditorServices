@@ -514,7 +514,11 @@ namespace Microsoft.PowerShell.EditorServices
         /// </returns>
         public StackFrameDetails[] GetStackFrames()
         {
-            return this.stackFrameDetails;
+            // TODO: REMOVE THIS
+            return new StackFrameDetails[0];
+
+            // TODO: Re-instate this!
+            //return this.stackFrameDetails;
         }
 
         /// <summary>
@@ -525,16 +529,20 @@ namespace Microsoft.PowerShell.EditorServices
         /// <returns>The list of VariableScope instances which describe the available variable scopes.</returns>
         public VariableScope[] GetVariableScopes(int stackFrameId)
         {
-            int localStackFrameVariableId = this.stackFrameDetails[stackFrameId].LocalVariables.Id;
-            int autoVariablesId = this.stackFrameDetails[stackFrameId].AutoVariables.Id;
+            // TODO: REMOVE THIS
+            return new VariableScope[0];
 
-            return new VariableScope[]
-            {
-                new VariableScope(autoVariablesId, VariableContainerDetails.AutoVariablesName),
-                new VariableScope(localStackFrameVariableId, VariableContainerDetails.LocalScopeName),
-                new VariableScope(this.scriptScopeVariables.Id, VariableContainerDetails.ScriptScopeName),
-                new VariableScope(this.globalScopeVariables.Id, VariableContainerDetails.GlobalScopeName),  
-            };
+            // TODO: Re-instate this!
+            //int localStackFrameVariableId = this.stackFrameDetails[stackFrameId].LocalVariables.Id;
+            //int autoVariablesId = this.stackFrameDetails[stackFrameId].AutoVariables.Id;
+
+            //return new VariableScope[]
+            //{
+            //    new VariableScope(autoVariablesId, VariableContainerDetails.AutoVariablesName),
+            //    new VariableScope(localStackFrameVariableId, VariableContainerDetails.LocalScopeName),
+            //    new VariableScope(this.scriptScopeVariables.Id, VariableContainerDetails.ScriptScopeName),
+            //    new VariableScope(this.globalScopeVariables.Id, VariableContainerDetails.GlobalScopeName),  
+            //};
         }
 
         #endregion
@@ -849,14 +857,12 @@ namespace Microsoft.PowerShell.EditorServices
 
         private async void OnDebuggerStop(object sender, DebuggerStopEventArgs e)
         {
+            // TODO: Re-enable!
             // Get call stack and variables.
-            await this.FetchStackFramesAndVariables();
+            //await this.FetchStackFramesAndVariables();
 
             // Notify the host that the debugger is stopped
-            if (this.DebuggerStopped != null)
-            {
-                this.DebuggerStopped(sender, e);
-            }
+            this.DebuggerStopped?.Invoke(sender, e);
         }
 
         /// <summary>

@@ -464,23 +464,23 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
                 signatureHelp.Signatures[0].Label);
         }
 
-        [Fact]
-        public async Task ServiceExecutesReplCommandAndReceivesOutput()
-        {
-            OutputReader outputReader = new OutputReader(this.protocolClient);
+        //[Fact]
+        //public async Task ServiceExecutesReplCommandAndReceivesOutput()
+        //{
+        //    OutputReader outputReader = new OutputReader(this.protocolClient);
 
-            await 
-                this.SendRequest(
-                    EvaluateRequest.Type,
-                    new EvaluateRequestArguments
-                    {
-                        Expression = "1 + 2"
-                    });
+        //    await 
+        //        this.SendRequest(
+        //            EvaluateRequest.Type,
+        //            new EvaluateRequestArguments
+        //            {
+        //                Expression = "1 + 2"
+        //            });
 
-            Assert.Equal("1 + 2", await outputReader.ReadLine());
-            await outputReader.ReadLine(); // Skip the empty line
-            Assert.Equal("3", await outputReader.ReadLine());
-        }
+        //    Assert.Equal("1 + 2", await outputReader.ReadLine());
+        //    await outputReader.ReadLine(); // Skip the empty line
+        //    Assert.Equal("3", await outputReader.ReadLine());
+        //}
 
         [Fact]
         public async Task ServiceExpandsAliases()
@@ -493,214 +493,214 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
             Assert.Equal("Get-ChildItem\r\nGet-Location", expandedText);
         }
 
-        [Fact]
-        public async Task ServiceExecutesReplCommandAndReceivesChoicePrompt()
-        {
-            OutputReader outputReader = new OutputReader(this.protocolClient);
+        //[Fact]
+        //public async Task ServiceExecutesReplCommandAndReceivesChoicePrompt()
+        //{
+        //    OutputReader outputReader = new OutputReader(this.protocolClient);
 
-            string choiceScript =
-                @"
-                $caption = ""Test Choice"";
-                $message = ""Make a selection"";
-                $choiceA = New-Object System.Management.Automation.Host.ChoiceDescription ""&Apple"",""Help for Apple"";
-                $choiceB = New-Object System.Management.Automation.Host.ChoiceDescription ""Banana"",""Help for Banana"";
-                $choices = [System.Management.Automation.Host.ChoiceDescription[]]($choiceA,$choiceB);
-                $host.ui.PromptForChoice($caption, $message, $choices, 1)";
+        //    string choiceScript =
+        //        @"
+        //        $caption = ""Test Choice"";
+        //        $message = ""Make a selection"";
+        //        $choiceA = New-Object System.Management.Automation.Host.ChoiceDescription ""&Apple"",""Help for Apple"";
+        //        $choiceB = New-Object System.Management.Automation.Host.ChoiceDescription ""Banana"",""Help for Banana"";
+        //        $choices = [System.Management.Automation.Host.ChoiceDescription[]]($choiceA,$choiceB);
+        //        $host.ui.PromptForChoice($caption, $message, $choices, 1)";
 
-            Task<Tuple<ShowChoicePromptRequest, RequestContext<ShowChoicePromptResponse>>> choicePromptTask =
-                this.WaitForRequest(ShowChoicePromptRequest.Type);
+        //    Task<Tuple<ShowChoicePromptRequest, RequestContext<ShowChoicePromptResponse>>> choicePromptTask =
+        //        this.WaitForRequest(ShowChoicePromptRequest.Type);
 
-            // Execute the script but don't await the task yet because
-            // the choice prompt will block execution from completing
-            Task<EvaluateResponseBody> evaluateTask =
-                this.SendRequest(
-                    EvaluateRequest.Type,
-                    new EvaluateRequestArguments
-                    {
-                        Expression = choiceScript,
-                        Context = "repl"
-                    });
+        //    // Execute the script but don't await the task yet because
+        //    // the choice prompt will block execution from completing
+        //    Task<EvaluateResponseBody> evaluateTask =
+        //        this.SendRequest(
+        //            EvaluateRequest.Type,
+        //            new EvaluateRequestArguments
+        //            {
+        //                Expression = choiceScript,
+        //                Context = "repl"
+        //            });
 
-            // Wait for the choice prompt request and check expected values
-            Tuple<ShowChoicePromptRequest, RequestContext<ShowChoicePromptResponse>> requestResponseContext = await choicePromptTask;
-            ShowChoicePromptRequest showChoicePromptRequest = requestResponseContext.Item1;
-            RequestContext<ShowChoicePromptResponse> requestContext = requestResponseContext.Item2;
+        //    // Wait for the choice prompt request and check expected values
+        //    Tuple<ShowChoicePromptRequest, RequestContext<ShowChoicePromptResponse>> requestResponseContext = await choicePromptTask;
+        //    ShowChoicePromptRequest showChoicePromptRequest = requestResponseContext.Item1;
+        //    RequestContext<ShowChoicePromptResponse> requestContext = requestResponseContext.Item2;
 
-            Assert.Equal(1, showChoicePromptRequest.DefaultChoice);
+        //    Assert.Equal(1, showChoicePromptRequest.DefaultChoice);
 
-            // Respond to the prompt request
-            await requestContext.SendResult(
-                new ShowChoicePromptResponse
-                {
-                    ChosenItem = "a"
-                });
+        //    // Respond to the prompt request
+        //    await requestContext.SendResult(
+        //        new ShowChoicePromptResponse
+        //        {
+        //            ChosenItem = "a"
+        //        });
 
-            // Skip the initial script lines (6 script lines plus 2 blank lines)
-            string[] outputLines = await outputReader.ReadLines(8);
+        //    // Skip the initial script lines (6 script lines plus 2 blank lines)
+        //    string[] outputLines = await outputReader.ReadLines(8);
 
-            // Wait for the selection to appear as output
-            await evaluateTask;
-            Assert.Equal("0", await outputReader.ReadLine());
-        }
+        //    // Wait for the selection to appear as output
+        //    await evaluateTask;
+        //    Assert.Equal("0", await outputReader.ReadLine());
+        //}
 
-        [Fact]
-        public async Task ServiceExecutesReplCommandAndReceivesInputPrompt()
-        {
-            OutputReader outputReader = new OutputReader(this.protocolClient);
+        //[Fact]
+        //public async Task ServiceExecutesReplCommandAndReceivesInputPrompt()
+        //{
+        //    OutputReader outputReader = new OutputReader(this.protocolClient);
 
-            string promptScript =
-                @"
-                $NameField = New-Object System.Management.Automation.Host.FieldDescription ""Name""
-                $NameField.SetParameterType([System.String])
-                $fields = [System.Management.Automation.Host.FieldDescription[]]($NameField)
-                $host.ui.Prompt($null, $null, $fields)";
+        //    string promptScript =
+        //        @"
+        //        $NameField = New-Object System.Management.Automation.Host.FieldDescription ""Name""
+        //        $NameField.SetParameterType([System.String])
+        //        $fields = [System.Management.Automation.Host.FieldDescription[]]($NameField)
+        //        $host.ui.Prompt($null, $null, $fields)";
 
-            Task<Tuple<ShowInputPromptRequest, RequestContext<ShowInputPromptResponse>>> inputPromptTask =
-                this.WaitForRequest(ShowInputPromptRequest.Type);
+        //    Task<Tuple<ShowInputPromptRequest, RequestContext<ShowInputPromptResponse>>> inputPromptTask =
+        //        this.WaitForRequest(ShowInputPromptRequest.Type);
 
-            // Execute the script but don't await the task yet because
-            // the choice prompt will block execution from completing
-            Task<EvaluateResponseBody> evaluateTask =
-                this.SendRequest(
-                    EvaluateRequest.Type,
-                    new EvaluateRequestArguments
-                    {
-                        Expression = promptScript,
-                        Context = "repl"
-                    });
+        //    // Execute the script but don't await the task yet because
+        //    // the choice prompt will block execution from completing
+        //    Task<EvaluateResponseBody> evaluateTask =
+        //        this.SendRequest(
+        //            EvaluateRequest.Type,
+        //            new EvaluateRequestArguments
+        //            {
+        //                Expression = promptScript,
+        //                Context = "repl"
+        //            });
             
-            // Wait for the input prompt request and check expected values
-            Tuple<ShowInputPromptRequest, RequestContext<ShowInputPromptResponse>> requestResponseContext = await inputPromptTask;
-            ShowInputPromptRequest showInputPromptRequest = requestResponseContext.Item1;
-            RequestContext<ShowInputPromptResponse> requestContext = requestResponseContext.Item2;
+        //    // Wait for the input prompt request and check expected values
+        //    Tuple<ShowInputPromptRequest, RequestContext<ShowInputPromptResponse>> requestResponseContext = await inputPromptTask;
+        //    ShowInputPromptRequest showInputPromptRequest = requestResponseContext.Item1;
+        //    RequestContext<ShowInputPromptResponse> requestContext = requestResponseContext.Item2;
 
-            Assert.Equal("Name", showInputPromptRequest.Name);
+        //    Assert.Equal("Name", showInputPromptRequest.Name);
 
-            // Respond to the prompt request
-            await requestContext.SendResult(
-                new ShowInputPromptResponse
-                {
-                    ResponseText = "John"
-                });
+        //    // Respond to the prompt request
+        //    await requestContext.SendResult(
+        //        new ShowInputPromptResponse
+        //        {
+        //            ResponseText = "John"
+        //        });
 
-            // Skip the initial script lines (4 script lines plus 2 blank lines)
-            string[] scriptLines = await outputReader.ReadLines(6);
+        //    // Skip the initial script lines (4 script lines plus 2 blank lines)
+        //    string[] scriptLines = await outputReader.ReadLines(6);
 
-            // Verify the first line
-            Assert.Equal("Name: John", await outputReader.ReadLine());
+        //    // Verify the first line
+        //    Assert.Equal("Name: John", await outputReader.ReadLine());
 
-            // Verify the rest of the output
-            string[] outputLines = await outputReader.ReadLines(4);
-            Assert.Equal("", outputLines[0]);
-            Assert.Equal("Key  Value", outputLines[1]);
-            Assert.Equal("---  -----", outputLines[2]);
-            Assert.Equal("Name John ", outputLines[3]);
+        //    // Verify the rest of the output
+        //    string[] outputLines = await outputReader.ReadLines(4);
+        //    Assert.Equal("", outputLines[0]);
+        //    Assert.Equal("Key  Value", outputLines[1]);
+        //    Assert.Equal("---  -----", outputLines[2]);
+        //    Assert.Equal("Name John ", outputLines[3]);
 
-            // Wait for execution to complete
-            await evaluateTask;
-        }
+        //    // Wait for execution to complete
+        //    await evaluateTask;
+        //}
 
-        [Fact]
-        public async Task ServiceExecutesNativeCommandAndReceivesCommand()
-        {
-            OutputReader outputReader = new OutputReader(this.protocolClient);
+        //[Fact]
+        //public async Task ServiceExecutesNativeCommandAndReceivesCommand()
+        //{
+        //    OutputReader outputReader = new OutputReader(this.protocolClient);
 
-            // Execute the script but don't await the task yet because
-            // the choice prompt will block execution from completing
-            Task<EvaluateResponseBody> evaluateTask =
-                this.SendRequest(
-                    EvaluateRequest.Type,
-                    new EvaluateRequestArguments
-                    {
-                        Expression = "cmd.exe /c 'echo Test Output'",
-                        Context = "repl"
-                    });
+        //    // Execute the script but don't await the task yet because
+        //    // the choice prompt will block execution from completing
+        //    Task<EvaluateResponseBody> evaluateTask =
+        //        this.SendRequest(
+        //            EvaluateRequest.Type,
+        //            new EvaluateRequestArguments
+        //            {
+        //                Expression = "cmd.exe /c 'echo Test Output'",
+        //                Context = "repl"
+        //            });
 
-            // Skip the command line and the following newline
-            await outputReader.ReadLines(2);
+        //    // Skip the command line and the following newline
+        //    await outputReader.ReadLines(2);
 
-            // Wait for the selection to appear as output
-            await evaluateTask;
-            Assert.Equal("Test Output", await outputReader.ReadLine());
-        }
+        //    // Wait for the selection to appear as output
+        //    await evaluateTask;
+        //    Assert.Equal("Test Output", await outputReader.ReadLine());
+        //}
 
-        [Fact]
-        public async Task ServiceLoadsProfilesOnDemand()
-        {
-            string testHostName = "Test.PowerShellEditorServices";
-            string profileName =
-                string.Format(
-                    "{0}_{1}",
-                    testHostName,
-                    ProfilePaths.AllHostsProfileName);
-            string testProfilePath =
-                Path.Combine(
-                    Path.GetFullPath(
-                        @"..\..\..\PowerShellEditorServices.Test.Shared\Profile\"),
-                    profileName);
+        //[Fact]
+        //public async Task ServiceLoadsProfilesOnDemand()
+        //{
+        //    string testHostName = "Test.PowerShellEditorServices";
+        //    string profileName =
+        //        string.Format(
+        //            "{0}_{1}",
+        //            testHostName,
+        //            ProfilePaths.AllHostsProfileName);
+        //    string testProfilePath =
+        //        Path.Combine(
+        //            Path.GetFullPath(
+        //                @"..\..\..\PowerShellEditorServices.Test.Shared\Profile\"),
+        //            profileName);
 
-            string currentUserCurrentHostPath =
-                Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    "WindowsPowerShell",
-                    profileName);
+        //    string currentUserCurrentHostPath =
+        //        Path.Combine(
+        //            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        //            "WindowsPowerShell",
+        //            profileName);
 
-            // Copy the test profile to the current user's host profile path
-            File.Copy(testProfilePath, currentUserCurrentHostPath, true);
+        //    // Copy the test profile to the current user's host profile path
+        //    File.Copy(testProfilePath, currentUserCurrentHostPath, true);
 
-            Assert.True(
-                File.Exists(currentUserCurrentHostPath),
-                "Copied profile path does not exist!");
+        //    Assert.True(
+        //        File.Exists(currentUserCurrentHostPath),
+        //        "Copied profile path does not exist!");
 
-            // Send the configuration change to cause profiles to be loaded
-            await this.languageServiceClient.SendEvent(
-                DidChangeConfigurationNotification<LanguageServerSettingsWrapper>.Type,
-                new DidChangeConfigurationParams<LanguageServerSettingsWrapper>
-                {
-                    Settings = new LanguageServerSettingsWrapper
-                    {
-                        Powershell = new LanguageServerSettings
-                        {
-                            EnableProfileLoading = true,
-                            ScriptAnalysis = new ScriptAnalysisSettings
-                            {
-                                Enable = false
-                            }
-                        }
-                    }
-                });
+        //    // Send the configuration change to cause profiles to be loaded
+        //    await this.languageServiceClient.SendEvent(
+        //        DidChangeConfigurationNotification<LanguageServerSettingsWrapper>.Type,
+        //        new DidChangeConfigurationParams<LanguageServerSettingsWrapper>
+        //        {
+        //            Settings = new LanguageServerSettingsWrapper
+        //            {
+        //                Powershell = new LanguageServerSettings
+        //                {
+        //                    EnableProfileLoading = true,
+        //                    ScriptAnalysis = new ScriptAnalysisSettings
+        //                    {
+        //                        Enable = false
+        //                    }
+        //                }
+        //            }
+        //        });
 
-            OutputReader outputReader = new OutputReader(this.protocolClient);
+        //    OutputReader outputReader = new OutputReader(this.protocolClient);
 
-            Task<EvaluateResponseBody> evaluateTask =
-                this.SendRequest(
-                    EvaluateRequest.Type,
-                    new EvaluateRequestArguments
-                    {
-                        Expression = "\"PROFILE: $(Assert-ProfileLoaded)\"",
-                        Context = "repl"
-                    });
+        //    Task<EvaluateResponseBody> evaluateTask =
+        //        this.SendRequest(
+        //            EvaluateRequest.Type,
+        //            new EvaluateRequestArguments
+        //            {
+        //                Expression = "\"PROFILE: $(Assert-ProfileLoaded)\"",
+        //                Context = "repl"
+        //            });
 
-            // Try reading up to 10 lines to find the expected output line
-            string outputString = null;
-            for (int i = 0; i < 10; i++)
-            {
-                outputString = await outputReader.ReadLine();
+        //    // Try reading up to 10 lines to find the expected output line
+        //    string outputString = null;
+        //    for (int i = 0; i < 10; i++)
+        //    {
+        //        outputString = await outputReader.ReadLine();
 
-                if (outputString.StartsWith("PROFILE"))
-                {
-                    break;
-                }
-            }
+        //        if (outputString.StartsWith("PROFILE"))
+        //        {
+        //            break;
+        //        }
+        //    }
 
-            // Delete the test profile before any assert failures
-            // cause the function to exit
-            File.Delete(currentUserCurrentHostPath);
+        //    // Delete the test profile before any assert failures
+        //    // cause the function to exit
+        //    File.Delete(currentUserCurrentHostPath);
 
-            // Wait for the selection to appear as output
-            await evaluateTask;
-            Assert.Equal("PROFILE: True", outputString);
-        }
+        //    // Wait for the selection to appear as output
+        //    await evaluateTask;
+        //    Assert.Equal("PROFILE: True", outputString);
+        //}
 
         private async Task SendOpenFileEvent(string filePath, bool waitForDiagnostics = true)
         {

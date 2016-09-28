@@ -12,7 +12,7 @@
 RootModule = 'PowerShellEditorServices.psm1'
 
 # Version number of this module.
-ModuleVersion = '0.7.2'
+ModuleVersion = '0.7.9'
 
 # ID used to uniquely identify this module
 GUID = '9ca15887-53a2-479a-9cda-48d26bcb6c47'
@@ -66,7 +66,7 @@ Copyright = '(c) 2016 Microsoft. All rights reserved.'
 # NestedModules = @()
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
-FunctionsToExport = @('Start-EditorServicesHost')
+FunctionsToExport = @('New-EditorServicesHost')
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
 CmdletsToExport = @()
