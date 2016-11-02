@@ -56,7 +56,10 @@ param(
     $WaitForDebugger,
 
     [switch]
-    $ConfirmInstall
+    $ConfirmInstall,
+
+	[switch]
+	$LoadProfileScripts
 )
 
 # If PSReadline is present in the session, remove it so that runspace
@@ -173,6 +176,19 @@ $editorServicesHost =
         -LogLevel $LogLevel `
         -LanguageServicePort $languageServicePort `
         -DebugServicePort $debugServicePort `
+
+# Set the profile paths
+$hostProfileName = "$($HostProfileId_profile).ps1"
+$profile.AllUsersCurrentHost = Join-Path (Split-Path $profile.AllUsersAllHosts) -ChildPath $hostProfileName
+$profile.CurrentUserCurrentHost = Join-Path (Split-Path $profile.CurrentUserCurrentHost) -ChildPath $hostProfileName
+
+if ($LoadProfileScripts.IsPresent) {
+	# Before the host gets loaded, load profile scripts if necessary
+	. $profile.AllUsersAllHosts
+	. $profile.AllUsersCurrentHost
+	. $profile.CurrentUserAllHosts
+	. $profile.CurrentUserCurrentHost
+}
 
 $sessionInfo = @{
 	status = "started";

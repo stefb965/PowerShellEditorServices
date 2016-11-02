@@ -9,6 +9,7 @@ using Microsoft.PowerShell.EditorServices.Session;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Diagnostics;
+using System.Management.Automation;
 using System.Management.Automation.Runspaces;
 using System.Reflection;
 using System.Threading;
@@ -111,7 +112,7 @@ namespace Microsoft.PowerShell.EditorServices.Host
             int waitsRemaining = 10;
             if (waitForDebugger)
             {
-                while (waitsRemaining > 0 && !Debugger.IsAttached)
+                while (waitsRemaining > 0 && !System.Diagnostics.Debugger.IsAttached)
                 {
                     Thread.Sleep(1000);
                     waitsRemaining--;
@@ -184,78 +185,77 @@ namespace Microsoft.PowerShell.EditorServices.Host
         }
 
         /// <param name="profilePaths">The object containing the profile paths to load for this session.</param>
-        private Task LoadProfiles(ProfilePaths profilePaths)
-        {
-            return Task.FromResult(true);
-            //// Set the $profile variable in the runspace
-            //if (this.profilePaths != null)
-            //{
-            //    this.SetProfileVariableInCurrentRunspace(profilePaths);
-            //}
+        //private Task LoadProfiles(ProfilePaths profilePaths)
+        //{
+        //    // Set the $profile variable in the runspace
+        //    if (this.Configuration.ProfilePaths != null)
+        //    {
+        //        this.SetProfileVariableInCurrentRunspace(profilePaths);
+        //    }
+        //}
 
-            //private void SetProfileVariableInCurrentRunspace(ProfilePaths profilePaths)
-            //{
-            //    // Create the $profile variable
-            //    PSObject profile = new PSObject(profilePaths.CurrentUserCurrentHost);
+        //private void SetProfileVariableInCurrentRunspace(ProfilePaths profilePaths)
+        //{
+        //    // Create the $profile variable
+        //    PSObject profile = new PSObject(profilePaths.CurrentUserCurrentHost);
 
-            //    profile.Members.Add(
-            //        new PSNoteProperty(
-            //            nameof(profilePaths.AllUsersAllHosts),
-            //            profilePaths.AllUsersAllHosts));
+        //    profile.Members.Add(
+        //        new PSNoteProperty(
+        //            nameof(profilePaths.AllUsersAllHosts),
+        //            profilePaths.AllUsersAllHosts));
 
-            //    profile.Members.Add(
-            //        new PSNoteProperty(
-            //            nameof(profilePaths.AllUsersCurrentHost),
-            //            profilePaths.AllUsersCurrentHost));
+        //    profile.Members.Add(
+        //        new PSNoteProperty(
+        //            nameof(profilePaths.AllUsersCurrentHost),
+        //            profilePaths.AllUsersCurrentHost));
 
-            //    profile.Members.Add(
-            //        new PSNoteProperty(
-            //            nameof(profilePaths.CurrentUserAllHosts),
-            //            profilePaths.CurrentUserAllHosts));
+        //    profile.Members.Add(
+        //        new PSNoteProperty(
+        //            nameof(profilePaths.CurrentUserAllHosts),
+        //            profilePaths.CurrentUserAllHosts));
 
-            //    profile.Members.Add(
-            //        new PSNoteProperty(
-            //            nameof(profilePaths.CurrentUserCurrentHost),
-            //            profilePaths.CurrentUserCurrentHost));
+        //    profile.Members.Add(
+        //        new PSNoteProperty(
+        //            nameof(profilePaths.CurrentUserCurrentHost),
+        //            profilePaths.CurrentUserCurrentHost));
 
-            //    Logger.Write(
-            //        LogLevel.Verbose,
-            //        string.Format(
-            //            "Setting $profile variable in runspace.  Current user host profile path: {0}",
-            //            profilePaths.CurrentUserCurrentHost));
+        //    Logger.Write(
+        //        LogLevel.Verbose,
+        //        string.Format(
+        //            "Setting $profile variable in runspace.  Current user host profile path: {0}",
+        //            profilePaths.CurrentUserCurrentHost));
 
-            //    // Set the variable in the runspace
-            //    this.powerShell.Commands.Clear();
-            //    this.powerShell
-            //        .AddCommand("Set-Variable")
-            //        .AddParameter("Name", "profile")
-            //        .AddParameter("Value", profile)
-            //        .AddParameter("Option", "None");
-            //    this.powerShell.Invoke();
-            //    this.powerShell.Commands.Clear();
-            //}
+        //    // Set the variable in the runspace
+        //    this.powerShell.Commands.Clear();
+        //    this.powerShell
+        //        .AddCommand("Set-Variable")
+        //        .AddParameter("Name", "profile")
+        //        .AddParameter("Value", profile)
+        //        .AddParameter("Option", "None");
+        //    this.powerShell.Invoke();
+        //    this.powerShell.Commands.Clear();
+        //}
 
-            ///// <summary>
-            ///// Loads PowerShell profiles for the host from the specified
-            ///// profile locations.  Only the profile paths which exist are
-            ///// loaded.
-            ///// </summary>
-            ///// <returns>A Task that can be awaited for completion.</returns>
-            //public async Task LoadHostProfiles()
-            //{
-            //    if (this.profilePaths != null)
-            //    {
-            //        // Load any of the profile paths that exist
-            //        PSCommand command = null;
-            //        foreach (var profilePath in this.profilePaths.GetLoadableProfilePaths())
-            //        {
-            //            command = new PSCommand();
-            //            command.AddCommand(profilePath, false);
-            //            await this.ExecuteCommand(command);
-            //        }
-            //    }
-            //}
-        }
+        ///// <summary>
+        ///// Loads PowerShell profiles for the host from the specified
+        ///// profile locations.  Only the profile paths which exist are
+        ///// loaded.
+        ///// </summary>
+        ///// <returns>A Task that can be awaited for completion.</returns>
+        //public async Task LoadHostProfiles()
+        //{
+        //    if (this.profilePaths != null)
+        //    {
+        //        // Load any of the profile paths that exist
+        //        PSCommand command = null;
+        //        foreach (var profilePath in this.profilePaths.GetLoadableProfilePaths())
+        //        {
+        //            command = new PSCommand();
+        //            command.AddCommand(profilePath, false);
+        //            await this.ExecuteCommand(command);
+        //        }
+        //    }
+        //}
 
         /// <summary>
         /// Starts the language service with the specified TCP socket port.
