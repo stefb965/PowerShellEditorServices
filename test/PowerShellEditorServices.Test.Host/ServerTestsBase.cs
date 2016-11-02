@@ -34,7 +34,7 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
             string scriptPath = Path.Combine(modulePath, "Start-EditorServices.ps1");
 
             // TODO: Need to determine the right module version programmatically!
-            string editorServicesModuleVersion = "0.7.2";
+            string editorServicesModuleVersion = "0.7.9";
             string sessionDetailsPath =
                 Path.Combine(
                     Path.GetTempPath(),
@@ -64,7 +64,6 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
                 {
                     "-NoProfile",
                     "-NoExit",
-                    //"-NonInteractive",
                     "-ExecutionPolicy", "Unrestricted",
                     "-Command \"" + scriptArgs + "\""
                 };
@@ -75,19 +74,14 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
                 {
                     FileName = "powershell.exe",
                     Arguments = string.Join(" ", args),
-                    //CreateNoWindow = true,
-                    //UseShellExecute = false,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
                 },
                 EnableRaisingEvents = true,
             };
 
             // Start the process
             this.serviceProcess.Start();
-
-            // Wait for the server to finish initializing
-            //Task<string> stdoutTask = this.serviceProcess.StandardOutput.ReadLineAsync();
-            //Task<string> stderrTask = this.serviceProcess.StandardError.ReadLineAsync();
-            //Task<string> completedRead = await Task.WhenAny<string>(stdoutTask, stderrTask);
 
             for (int tries = 0; tries < 10; tries++)
             {
@@ -123,6 +117,8 @@ namespace Microsoft.PowerShell.EditorServices.Test.Host
             // Failed to initialize
             throw new TimeoutException(
                 $"Timed out while waiting for session details to be written at path: {sessionDetailsPath}");
+
+            // TODO: Need a new way to get error info from the process if initialization fails!
 
             //else
             //{
