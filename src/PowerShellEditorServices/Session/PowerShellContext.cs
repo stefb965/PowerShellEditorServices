@@ -45,6 +45,7 @@ namespace Microsoft.PowerShell.EditorServices
 
         private Task executionQueueTask;
         private CancellationTokenSource executionQueueCancellationToken;
+        private PSEventSubscriber onIdleSubscriber;
 
         // TODO: Alias this type?
         private AsyncQueue<Tuple<IExecutionRequest, TaskCompletionSource<bool>>> executionRequestQueue = new AsyncQueue<Tuple<IExecutionRequest, TaskCompletionSource<bool>>>();
@@ -119,6 +120,23 @@ namespace Microsoft.PowerShell.EditorServices
 
             this.currentRunspace = initialRunspace;
             this.currentRunspace.AvailabilityChanged += this.currentRunspace_AvailabilityChanged;
+
+            // TODO: Wrap this?
+            this.onIdleSubscriber =
+                this.currentRunspace.Events.SubscribeEvent(
+                    null,
+                    "PowerShell.OnIdle",
+                    "PowerShell.OnIdle",
+                    null,
+                    (obj, args) =>
+                    {
+                        this.HandleOnIdleEvent(obj, args).Wait();
+                    },
+                    true,
+                    false);
+
+            Logger.Write(LogLevel.Verbose, $"PowerShell.OnIdle handler has been subscribed.");
+
             if (this.currentRunspace.Debugger != null)
             {
                 this.ConfigureDebugger();
@@ -136,25 +154,25 @@ namespace Microsoft.PowerShell.EditorServices
             }
 
             // Start a thread that processes the execution request queue
-            this.executionQueueCancellationToken = new CancellationTokenSource();
-            this.executionQueueTask =
-                Task.Factory.StartNew(
-                    () => 
-                    {
-                        try
-                        {
-                            this.ProcessExecutionRequestQueue(this.executionQueueCancellationToken.Token).GetAwaiter().GetResult();
-                        }
-                        catch (TaskCanceledException)
-                        {
-                            Logger.Write(
-                                LogLevel.Verbose,
-                                "PowerShellContext execution request queue thread is exiting");
-                        }
-                    },
-                    CancellationToken.None,
-                    TaskCreationOptions.LongRunning,
-                    TaskScheduler.Default);
+            //this.executionQueueCancellationToken = new CancellationTokenSource();
+            //this.executionQueueTask =
+            //    Task.Factory.StartNew(
+            //        () => 
+            //        {
+            //            try
+            //            {
+            //                this.ProcessExecutionRequestQueue(this.executionQueueCancellationToken.Token).GetAwaiter().GetResult();
+            //            }
+            //            catch (TaskCanceledException)
+            //            {
+            //                Logger.Write(
+            //                    LogLevel.Verbose,
+            //                    "PowerShellContext execution request queue thread is exiting");
+            //            }
+            //        },
+            //        CancellationToken.None,
+            //        TaskCreationOptions.LongRunning,
+            //        TaskScheduler.Default);
 
             await this.ConfigureRunspace();
 
@@ -167,46 +185,46 @@ namespace Microsoft.PowerShell.EditorServices
 
             // Find the DebuggerStop event using reflection so that we can
             // get access to its current list of registered handlers
-            Type debuggerType = this.currentRunspace.Debugger.GetType();
-            EventInfo eventInfo = debuggerType.GetEvent("DebuggerStop");
-            FieldInfo eventField =
-                eventInfo.DeclaringType.GetField(
-                    "DebuggerStop",
-                    BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+            //Type debuggerType = this.currentRunspace.Debugger.GetType();
+            //EventInfo eventInfo = debuggerType.GetEvent("DebuggerStop");
+            //FieldInfo eventField =
+            //    eventInfo.DeclaringType.GetField(
+            //        "DebuggerStop",
+            //        BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
 
-            EventHandler<DebuggerStopEventArgs> eventObject =
-                (EventHandler<DebuggerStopEventArgs>)eventField.GetValue(
-                    this.currentRunspace.Debugger);
+            //EventHandler<DebuggerStopEventArgs> eventObject =
+            //    (EventHandler<DebuggerStopEventArgs>)eventField.GetValue(
+            //        this.currentRunspace.Debugger);
 
-            Delegate[] originalHandlerList = new Delegate[0];
-            if (eventObject != null)
-            {
-                // Temporarily remove the current handlers
-                eventObject.GetInvocationList();
-                foreach (var handler in originalHandlerList)
-                {
-                    eventInfo.RemoveEventHandler(this.currentRunspace.Debugger, handler);
-                }
-            }
+            //Delegate[] originalHandlerList = new Delegate[0];
+            //if (eventObject != null)
+            //{
+            //    // Temporarily remove the current handlers
+            //    eventObject.GetInvocationList();
+            //    foreach (var handler in originalHandlerList)
+            //    {
+            //        eventInfo.RemoveEventHandler(this.currentRunspace.Debugger, handler);
+            //    }
+            //}
 
-            // Add our OnDebuggerStop method as a handler
-            eventInfo.AddEventHandler(
-                this.currentRunspace.Debugger,
-                (EventHandler<DebuggerStopEventArgs>)this.OnDebuggerStop);
+            //// Add our OnDebuggerStop method as a handler
+            //eventInfo.AddEventHandler(
+            //    this.currentRunspace.Debugger,
+            //    (EventHandler<DebuggerStopEventArgs>)this.OnDebuggerStop);
 
-            // Add back the existing handlers
-            foreach (var handler in originalHandlerList)
-            {
-                eventInfo.AddEventHandler(this.currentRunspace.Debugger, handler);
-            }
+            //// Add back the existing handlers
+            //foreach (var handler in originalHandlerList)
+            //{
+            //    eventInfo.AddEventHandler(this.currentRunspace.Debugger, handler);
+            //}
 
-            // Add a final handler so we know when the debugger has resumed execution
-            this.currentRunspace.Debugger.DebuggerStop +=
-                (obj, args) =>
-                {
-                    // At this point the debugger must have resumed
-                    this.isDebuggerStopped = false;
-                };
+            //// Add a final handler so we know when the debugger has resumed execution
+            //this.currentRunspace.Debugger.DebuggerStop +=
+            //    (obj, args) =>
+            //    {
+            //        // At this point the debugger must have resumed
+            //        this.isDebuggerStopped = false;
+            //    };
         }
 
         private async Task ProcessExecutionRequestQueue(CancellationToken cancellationToken)
@@ -246,6 +264,44 @@ namespace Microsoft.PowerShell.EditorServices
                         }
 #endif
                     }
+                }
+            }
+        }
+
+        private async Task FlushExecutionRequestQueue(CancellationToken cancellationToken)
+        {
+            // Try to execute the task until it succeeds or is cancelled
+            while (!cancellationToken.IsCancellationRequested && !this.executionRequestQueue.IsEmpty)
+            {
+                Tuple<IExecutionRequest, TaskCompletionSource<bool>> executionDetails = await this.executionRequestQueue.DequeueAsync(cancellationToken);
+
+                // TODO: Should there be an ExecutionResult or something?
+                try
+                {
+                    await executionDetails.Item1.Execute(this.currentRunspace);
+                    executionDetails.Item2.TrySetResult(true);
+
+                    // Listen for the next task
+                    break;
+                }
+                catch (PSInvalidOperationException e)
+                {
+                    // TODO: This NanoServer check is likely not needed when compiling against latest CoreCLR.
+#if !NanoServer
+                    // TODO: Does this work across PowerShell versions?
+                    if (e.TargetSite.Name.StartsWith("DoConcurrentCheck"))
+                    {
+#endif
+                        Logger.Write(LogLevel.Verbose, "Runspace was busy when executing, trying again soon...");
+
+                        await Task.Delay(250);
+#if !NanoServer
+                    }
+                    else
+                    {
+                        Logger.Write(LogLevel.Verbose, $"Different kind of message... {e.TargetSite.Name}\r\n\r\n{e.Message}");
+                    }
+#endif
                 }
             }
         }
@@ -303,6 +359,16 @@ namespace Microsoft.PowerShell.EditorServices
                 // TODO: Should this be configurable?
                 await this.SetExecutionPolicy(ExecutionPolicy.RemoteSigned);
             }
+        }
+
+        private async Task HandleOnIdleEvent(object source, PSEventArgs args)
+        {
+            //if (this.currentRunspace.Debugger.InBreakpoint)
+            {
+                Logger.Write(LogLevel.Verbose, "# ON IDLE ---------------------------------------------------");
+            }
+
+            await this.FlushExecutionRequestQueue(CancellationToken.None);
         }
 
         private async Task<PSHost> GetHostVariable()
