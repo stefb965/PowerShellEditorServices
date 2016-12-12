@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
-VisualStudioVersion = 14.0.25123.0
+VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{F594E7FD-1E72-4E51-A496-B019C2BA3180}"
 EndProject
@@ -42,6 +42,10 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "nano", "nano", "{5B98CD12-46AA-47CB-95B9-AFF11EA76489}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nano.PowerShellEditorServices", "src\PowerShellEditorServices\Nano.PowerShellEditorServices.csproj", "{02DC1749-7657-4A41-9865-313F07DE8901}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PowerShellEditorServices.Core", "src\PowerShellEditorServices.Core\PowerShellEditorServices.Core.csproj", "{71550F40-87D2-40D5-A50B-1CC5C8A849A8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PowerShellEditorServices.Test.Core", "test\PowerShellEditorServices.Test.Core\PowerShellEditorServices.Test.Core.csproj", "{062D685D-59F2-4D21-969A-5F1ACDF9B349}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -89,6 +93,14 @@ Global
 		{02DC1749-7657-4A41-9865-313F07DE8901}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{02DC1749-7657-4A41-9865-313F07DE8901}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{02DC1749-7657-4A41-9865-313F07DE8901}.Release|Any CPU.Build.0 = Release|Any CPU
+		{71550F40-87D2-40D5-A50B-1CC5C8A849A8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{71550F40-87D2-40D5-A50B-1CC5C8A849A8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{71550F40-87D2-40D5-A50B-1CC5C8A849A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{71550F40-87D2-40D5-A50B-1CC5C8A849A8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{062D685D-59F2-4D21-969A-5F1ACDF9B349}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{062D685D-59F2-4D21-969A-5F1ACDF9B349}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{062D685D-59F2-4D21-969A-5F1ACDF9B349}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{062D685D-59F2-4D21-969A-5F1ACDF9B349}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -106,5 +118,7 @@ Global
 		{EE0A010C-E246-49AE-92E7-AD4320C45086} = {F594E7FD-1E72-4E51-A496-B019C2BA3180}
 		{5B98CD12-46AA-47CB-95B9-AFF11EA76489} = {F594E7FD-1E72-4E51-A496-B019C2BA3180}
 		{02DC1749-7657-4A41-9865-313F07DE8901} = {5B98CD12-46AA-47CB-95B9-AFF11EA76489}
+		{71550F40-87D2-40D5-A50B-1CC5C8A849A8} = {EE0A010C-E246-49AE-92E7-AD4320C45086}
+		{062D685D-59F2-4D21-969A-5F1ACDF9B349} = {422E561A-8118-4BE7-A54F-9309E4F03AAE}
 	EndGlobalSection
 EndGlobal
