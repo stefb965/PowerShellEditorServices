@@ -22,6 +22,8 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.LanguageServer
     public class NewProjectFromTemplateResponse
     {
         public bool CreationSuccessful { get; set; }
+
+        public string DestinationPath { get; set; }
     }
 
     public class GetProjectTemplatesRequest

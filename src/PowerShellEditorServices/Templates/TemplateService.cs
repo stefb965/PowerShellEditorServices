@@ -158,8 +158,8 @@ namespace Microsoft.PowerShell.EditorServices.Templates
         /// </summary>
         /// <param name="templatePath">The folder path containing the template.</param>
         /// <param name="destinationPath">The folder path where the files will be created.</param>
-        /// <returns>A boolean-returning Task which communicates success or failure.</returns>
-        public async Task<bool> CreateFromTemplate(
+        /// <returns>A TemplateResult object with details about the created file or files.</returns>
+        public async Task<TemplateResult> CreateFromTemplate(
             string templatePath,
             string destinationPath)
         {
@@ -167,17 +167,18 @@ namespace Microsoft.PowerShell.EditorServices.Templates
                 LogLevel.Verbose,
                 $"Invoking Plaster...\n\n    TemplatePath: {templatePath}\n    DestinationPath: {destinationPath}");
 
-            PSCommand command = new PSCommand();
-            command.AddCommand("Invoke-Plaster");
-            command.AddParameter("TemplatePath", templatePath);
-            command.AddParameter("DestinationPath", destinationPath);
+            PSCommand psCommand = new PSCommand();
+            psCommand
+                .AddCommand("Invoke-Plaster")
+                .AddParameter("TemplatePath", templatePath)
+                .AddParameter("DestinationPath", destinationPath)
+                .AddParameter("PassThru");
 
-            var errorString = new System.Text.StringBuilder();
-            await this.powerShellContext.ExecuteCommand<PSObject>(
-                command, errorString, false, true);
+            var templateResult =
+                (await this.powerShellContext.ExecuteCommand<PSObject>(
+                    psCommand, false, true)).FirstOrDefault();
 
-            // If any errors were written out, creation was not successful
-            return errorString.Length == 0;
+            return CreateTemplateResult(templateResult);
         }
 
         #endregion
@@ -200,6 +201,29 @@ namespace Microsoft.PowerShell.EditorServices.Templates
                     ? string.Join(", ", tags)
                     : string.Empty
             };
+        }
+
+        private static TemplateResult CreateTemplateResult(PSObject psObject)
+        {
+            if (psObject != null)
+            {
+                return new TemplateResult
+                {
+                    IsSuccess = (bool)psObject.Members["Success"].Value,
+                    TemplatePath = (string)psObject.Members["TemplatePath"].Value,
+                    DestinationPath = (string)psObject.Members["DestinationPath"].Value,
+                    CreatedFiles = (string[])psObject.Members["CreatedFiles"].Value,
+                    UpdatedFiles = (string[])psObject.Members["UpdatedFiles"].Value,
+                    MissingModules = (string[])psObject.Members["MissingModules"].Value
+                };
+            }
+            else
+            {
+                return new TemplateResult
+                {
+                    IsSuccess = false
+                };
+            }
         }
 
         #endregion

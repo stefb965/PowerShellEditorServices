@@ -321,7 +321,8 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
                         await requestContext.SendResult(
                             new NewProjectFromTemplateResponse
                             {
-                                CreationSuccessful = task.Result
+                                CreationSuccessful = task.Result.IsSuccess,
+                                DestinationPath = task.Result.DestinationPath
                             });
                     });
 

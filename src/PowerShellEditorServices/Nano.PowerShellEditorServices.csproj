@@ -77,6 +77,7 @@
     <Compile Include="Extensions\IEditorOperations.cs" />
     <Compile Include="Templates\TemplateService.cs" />
     <Compile Include="Templates\TemplateDetails.cs" />
+    <Compile Include="Templates\TemplateResult.cs" />
     <Compile Include="Language\AstOperations.cs" />
     <Compile Include="Language\CommandHelpers.cs" />
     <Compile Include="Language\CompletionResults.cs" />
