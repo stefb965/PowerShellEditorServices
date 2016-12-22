@@ -132,7 +132,7 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         /// <summary>
-        /// Finds command completion details for the script given a file location 
+        /// Finds command completion details for the script given a file location
         /// </summary>
         /// <param name="file">The details and contents of a open script file</param>
         /// <param name="entryName">The name of the suggestion that needs details</param>
@@ -144,7 +144,7 @@ namespace Microsoft.PowerShell.EditorServices
             // Makes sure the most recent completions request was the same line and column as this request
             if (file.Id.Equals(mostRecentRequestFile))
             {
-                CompletionDetails completionResult = 
+                CompletionDetails completionResult =
                     mostRecentCompletions.Completions.FirstOrDefault(
                         result => result.CompletionText.Equals(entryName));
 
@@ -156,6 +156,11 @@ namespace Microsoft.PowerShell.EditorServices
             }
         }
 
+        public dynamic GetTree(ScriptFile scriptFile)
+        {
+            return AstOperations.GetTree(scriptFile.ScriptAst);
+        }
+
         /// <summary>
         /// Finds the symbol in the script given a file location
         /// </summary>
@@ -163,7 +168,7 @@ namespace Microsoft.PowerShell.EditorServices
         /// <param name="lineNumber">The line number of the cursor for the given script</param>
         /// <param name="columnNumber">The coulumn number of the cursor for the given script</param>
         /// <returns>A SymbolReference of the symbol found at the given location
-        /// or null if there is no symbol at that location 
+        /// or null if there is no symbol at that location
         /// </returns>
         public SymbolReference FindSymbolAtLocation(
             ScriptFile scriptFile,
@@ -255,7 +260,7 @@ namespace Microsoft.PowerShell.EditorServices
         public async Task<FindReferencesResult> FindReferencesOfSymbol(
             SymbolReference foundSymbol,
             ScriptFile[] referencedFiles)
-        {                
+        {
             if (foundSymbol != null)
             {
                 int symbolOffset = referencedFiles[0].GetOffsetAtPosition(
@@ -336,7 +341,7 @@ namespace Microsoft.PowerShell.EditorServices
                 }
             }
 
-            // if definition is not found in referenced files 
+            // if definition is not found in referenced files
             // look for it in the builtin commands
             if (foundDefinition == null)
             {
@@ -345,9 +350,9 @@ namespace Microsoft.PowerShell.EditorServices
                         foundSymbol.SymbolName,
                         this.powerShellContext);
 
-                foundDefinition = 
+                foundDefinition =
                     await FindDeclarationForBuiltinCommand(
-                        cmdInfo, 
+                        cmdInfo,
                         foundSymbol,
                         workspace);
             }
@@ -533,7 +538,7 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         private async Task<SymbolReference> FindDeclarationForBuiltinCommand(
-            CommandInfo cmdInfo, 
+            CommandInfo cmdInfo,
             SymbolReference foundSymbol,
             Workspace workspace)
         {

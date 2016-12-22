@@ -116,6 +116,8 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             this.SetRequestHandler(GetPSSARulesRequest.Type, this.HandleGetPSSARulesRequest);
             this.SetRequestHandler(SetPSSARulesRequest.Type, this.HandleSetPSSARulesRequest);
 
+            this.SetRequestHandler(GetAstRequest.Type, this.HandleGetAstRequest);
+
             // Initialize the extension service
             // TODO: This should be made awaited once Initialize is async!
             this.editorSession.ExtensionService.Initialize(
@@ -241,6 +243,15 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             }
 
             await requestContext.SendResult(rules);
+        }
+
+        private async Task HandleGetAstRequest(
+            string filePath,
+            RequestContext<object> requestContext)
+        {
+            var scriptFile = editorSession.Workspace.GetFile(filePath);
+            var tree = editorSession.LanguageService.GetTree(scriptFile);
+            requestContext.SendResult(tree);
         }
 
         private async Task HandleInstallModuleRequest(

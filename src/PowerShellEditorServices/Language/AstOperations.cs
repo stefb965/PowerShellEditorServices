@@ -20,7 +20,7 @@ namespace Microsoft.PowerShell.EditorServices
     internal static class AstOperations
     {
         /// <summary>
-        /// Gets completions for the symbol found in the Ast at 
+        /// Gets completions for the symbol found in the Ast at
         /// the given file offset.
         /// </summary>
         /// <param name="scriptAst">
@@ -40,13 +40,13 @@ namespace Microsoft.PowerShell.EditorServices
         /// symbol at the given offset.
         /// </returns>
         static public CommandCompletion GetCompletions(
-            Ast scriptAst, 
-            Token[] currentTokens, 
+            Ast scriptAst,
+            Token[] currentTokens,
             int fileOffset,
             Runspace runspace)
         {
             var type = scriptAst.Extent.StartScriptPosition.GetType();
-            var method = 
+            var method =
 #if NanoServer
                 type.GetMethod(
                     "CloneWithNewOffset",
@@ -59,9 +59,9 @@ namespace Microsoft.PowerShell.EditorServices
                     new[] { typeof(int) }, null);
 #endif
 
-            IScriptPosition cursorPosition = 
+            IScriptPosition cursorPosition =
                 (IScriptPosition)method.Invoke(
-                    scriptAst.Extent.StartScriptPosition, 
+                    scriptAst.Extent.StartScriptPosition,
                     new object[] { fileOffset });
 
             Logger.Write(
@@ -75,18 +75,18 @@ namespace Microsoft.PowerShell.EditorServices
             CommandCompletion commandCompletion = null;
             if (runspace.RunspaceAvailability == RunspaceAvailability.Available)
             {
-                using (System.Management.Automation.PowerShell powerShell = 
+                using (System.Management.Automation.PowerShell powerShell =
                         System.Management.Automation.PowerShell.Create())
                 {
                     powerShell.Runspace = runspace;
 
-                    commandCompletion = 
+                    commandCompletion =
                         CommandCompletion.CompleteInput(
-                            scriptAst, 
-                            currentTokens, 
-                            cursorPosition, 
-                            null, 
-                            powerShell); 
+                            scriptAst,
+                            currentTokens,
+                            cursorPosition,
+                            null,
+                            powerShell);
                 }
             }
 
@@ -94,7 +94,7 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         /// <summary>
-        /// Finds the symbol at a given file location 
+        /// Finds the symbol at a given file location
         /// </summary>
         /// <param name="scriptAst">The abstract syntax tree of the given script</param>
         /// <param name="lineNumber">The line number of the cursor for the given script</param>
@@ -132,15 +132,15 @@ namespace Microsoft.PowerShell.EditorServices
         /// <param name="AliasToCmdletDictionary">Dictionary maping aliases to cmdlets for finding alias references</param>
         /// <returns></returns>
         static public IEnumerable<SymbolReference> FindReferencesOfSymbol(
-            Ast scriptAst, 
-            SymbolReference symbolReference, 
+            Ast scriptAst,
+            SymbolReference symbolReference,
             Dictionary<String, List<String>> CmdletToAliasDictionary,
             Dictionary<String, String> AliasToCmdletDictionary)
         {
             // find the symbol evaluators for the node types we are handling
-            FindReferencesVisitor referencesVisitor = 
+            FindReferencesVisitor referencesVisitor =
                 new FindReferencesVisitor(
-                    symbolReference, 
+                    symbolReference,
                     CmdletToAliasDictionary,
                     AliasToCmdletDictionary);
             scriptAst.Visit(referencesVisitor);
@@ -158,8 +158,8 @@ namespace Microsoft.PowerShell.EditorServices
         /// <returns>A collection of SymbolReference objects that are refrences to the symbolRefrence
         /// not including aliases</returns>
         static public IEnumerable<SymbolReference> FindReferencesOfSymbol(
-            ScriptBlockAst scriptAst, 
-            SymbolReference foundSymbol, 
+            ScriptBlockAst scriptAst,
+            SymbolReference foundSymbol,
             bool needsAliases)
         {
             FindReferencesVisitor referencesVisitor =
@@ -170,7 +170,7 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         /// <summary>
-        /// Finds the definition of the symbol 
+        /// Finds the definition of the symbol
         /// </summary>
         /// <param name="scriptAst">The abstract syntax tree of the given script</param>
         /// <param name="symbolReference">The symbol that we are looking for the definition of</param>
@@ -179,7 +179,7 @@ namespace Microsoft.PowerShell.EditorServices
             Ast scriptAst,
             SymbolReference symbolReference)
         {
-            FindDeclartionVisitor declarationVisitor = 
+            FindDeclartionVisitor declarationVisitor =
                 new FindDeclartionVisitor(
                     symbolReference);
             scriptAst.Visit(declarationVisitor);
@@ -228,6 +228,36 @@ namespace Microsoft.PowerShell.EditorServices
             scriptAst.Visit(dotSourcedVisitor);
 
             return dotSourcedVisitor.DotSourcedFiles.ToArray();
+        }
+
+        static public dynamic GetTree(Ast scriptAst)
+        {
+            return CreateTree(CreateNode(scriptAst));
+        }
+
+        static dynamic CreateNode(Ast ast)
+        {
+            return new {
+                item = new { ast = ast, label = ast.Extent.File, id = ast.GetHashCode().ToString() },
+                children = new List<dynamic>()
+            };
+        }
+
+        static void CreateTree(dynamic node)
+        {
+            var astsFound = (node.ast as Ast).FindAll(a => a is Ast, true);
+            if (astsFound != null)
+            {
+                foreach (var astFound in astsFound)
+                {
+                    if (!astFound.Equals(node.item.ast) && node.item.ast.Equals(astFound.Parent))
+                    {
+                        var childNode = CreateNode(astFound);
+                        node.children.Add(childNode);
+                        CreateTree(childNode);
+                    }
+                }
+            }
         }
     }
 }
