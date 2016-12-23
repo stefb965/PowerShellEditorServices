@@ -36,6 +36,9 @@
     <DocumentationFile>bin\Release\Microsoft.PowerShell.EditorServices.XML</DocumentationFile>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\PowerShellEditorServices.Protocol\LanguageServer\GetAstRequest.cs">
+      <Link>GetAstRequest.cs</Link>
+    </Compile>
     <Compile Include="..\PowerShellEditorServices.Protocol\LanguageServer\GetPSSARulesRequest.cs">
       <Link>GetPSSARulesRequest.cs</Link>
     </Compile>
