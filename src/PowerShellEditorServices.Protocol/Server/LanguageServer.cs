@@ -251,7 +251,7 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
         {
             var scriptFile = editorSession.Workspace.GetFile(filePath);
             var tree = editorSession.LanguageService.GetTree(scriptFile);
-            requestContext.SendResult(tree);
+            await requestContext.SendResult(tree);
         }
 
         private async Task HandleInstallModuleRequest(

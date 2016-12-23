@@ -230,22 +230,35 @@ namespace Microsoft.PowerShell.EditorServices
             return dotSourcedVisitor.DotSourcedFiles.ToArray();
         }
 
-        static public dynamic GetTree(Ast scriptAst)
+        public static dynamic GetTree(Ast scriptAst)
         {
-            return CreateTree(CreateNode(scriptAst));
+            var node = CreateNode(scriptAst);
+            CreateTree(node);
+
+            // we need to filter because JSON serializer has a hard time serializing *Ast type
+            return FilterNode(node);
         }
 
-        static dynamic CreateNode(Ast ast)
+        private static dynamic CreateNode(Ast ast)
         {
             return new {
-                item = new { ast = ast, label = ast.Extent.File, id = ast.GetHashCode().ToString() },
+                item = new { ast = ast, label = ast.GetType().Name, id = ast.GetHashCode().ToString(), extent = ast.Extent },
                 children = new List<dynamic>()
             };
         }
 
-        static void CreateTree(dynamic node)
+        private static dynamic FilterNode(dynamic node)
         {
-            var astsFound = (node.ast as Ast).FindAll(a => a is Ast, true);
+            return new
+            {
+                item = new { label = node.item.label, id = node.item.id, extent = node.item.extent },
+                children = (node.children as List<dynamic>).Select(FilterNode)
+            };
+        }
+
+        private static void CreateTree(dynamic node)
+        {
+            var astsFound = (node.item.ast as Ast).FindAll(a => a is Ast, true);
             if (astsFound != null)
             {
                 foreach (var astFound in astsFound)
