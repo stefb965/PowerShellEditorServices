@@ -195,6 +195,7 @@ namespace Microsoft.PowerShell.EditorServices.Templates
                 Author = psObject.Members["Author"].Value as string,
                 Version = psObject.Members["Version"].Value.ToString(),
                 Description = psObject.Members["Description"].Value as string,
+                TemplateType = psObject.Members["TemplateType"].Value as string,
                 TemplatePath = psObject.Members["TemplatePath"].Value as string,
                 Tags =
                     tags != null
@@ -210,11 +211,13 @@ namespace Microsoft.PowerShell.EditorServices.Templates
                 return new TemplateResult
                 {
                     IsSuccess = (bool)psObject.Members["Success"].Value,
+                    TemplateType = (string)psObject.Members["TemplateType"].Value,
                     TemplatePath = (string)psObject.Members["TemplatePath"].Value,
                     DestinationPath = (string)psObject.Members["DestinationPath"].Value,
                     CreatedFiles = (string[])psObject.Members["CreatedFiles"].Value,
                     UpdatedFiles = (string[])psObject.Members["UpdatedFiles"].Value,
-                    MissingModules = (string[])psObject.Members["MissingModules"].Value
+                    MissingModules = (string[])psObject.Members["MissingModules"].Value,
+                    OpenFiles = (string[])psObject.Members["OpenFiles"].Value
                 };
             }
             else

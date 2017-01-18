@@ -17,6 +17,11 @@ namespace Microsoft.PowerShell.EditorServices.Templates
         public bool IsSuccess { get; set; }
 
         /// <summary>
+        /// Gets or sets the type of template that was used to create the result.
+        /// </summary>
+        public string TemplateType { get; set; }
+
+        /// <summary>
         /// Gets or sets the template path which was used in creation.
         /// </summary>
         public string TemplatePath { get; set; }
@@ -41,5 +46,10 @@ namespace Microsoft.PowerShell.EditorServices.Templates
         /// the created file or project to be fully functional.
         /// </summary>
         public string[] MissingModules { get; set; }
+
+        /// <summary>
+        /// Gets or sets the list of files that should be opened in the editor.
+        /// </summary>
+        public string[] OpenFiles { get; set; }
     }
 }

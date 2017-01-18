@@ -36,6 +36,11 @@ namespace Microsoft.PowerShell.EditorServices.Templates
         public string Tags { get; set; }
 
         /// <summary>
+        /// Gets or sets the template's type name, either "Item" or "Project".
+        /// </summary>
+        public string TemplateType { get; set; }
+
+        /// <summary>
         /// Gets or sets the template's folder path.
         /// </summary>
         public string TemplatePath { get; set; }
