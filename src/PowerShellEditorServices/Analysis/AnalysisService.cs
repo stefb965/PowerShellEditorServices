@@ -377,13 +377,6 @@ namespace Microsoft.PowerShell.EditorServices
 
         private IEnumerable<PSObject> InvokePowerShell(string command, IDictionary<string, object> paramArgMap)
         {
-            var task = InvokePowerShellAsync(command, paramArgMap);
-            task.Wait();
-            return task.Result;
-        }
-
-        private async Task<IEnumerable<PSObject>> InvokePowerShellAsync(string command, IDictionary<string, object> paramArgMap)
-        {
             using (var powerShell = System.Management.Automation.PowerShell.Create())
             {
                 powerShell.RunspacePool = this.analysisRunspacePool;
@@ -393,14 +386,18 @@ namespace Microsoft.PowerShell.EditorServices
                     powerShell.AddParameter(kvp.Key, kvp.Value);
                 }
 
-                var result = await Task.Factory.FromAsync(powerShell.BeginInvoke(), powerShell.EndInvoke);
-                if (result == null)
-                {
-                    return Enumerable.Empty<PSObject>();
-                }
-
-                return result;
+                return powerShell.Invoke() ?? Enumerable.Empty<PSObject>();
             }
+        }
+
+        private async Task<IEnumerable<PSObject>> InvokePowerShellAsync(string command, IDictionary<string, object> paramArgMap)
+        {
+            var task = Task.Run<IEnumerable<PSObject>>(() =>
+            {
+                return InvokePowerShell(command, paramArgMap);
+            });
+
+            return await task ?? Enumerable.Empty<PSObject>();
         }
 
         #endregion //private methods
