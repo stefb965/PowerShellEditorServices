@@ -6,11 +6,8 @@
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Linq;
-using System.Management.Automation.Runspaces;
-using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.PowerShell.EditorServices.Console;
-using System.Management.Automation;
 using System.Collections.Generic;
 using System.Text;
 using System.Collections;
