@@ -14,6 +14,7 @@ using System.Management.Automation;
 using System.Collections.Generic;
 using System.Text;
 using System.Collections;
+using Microsoft.PowerShell.EditorServices.Analysis;
 
 namespace Microsoft.PowerShell.EditorServices
 {
@@ -25,11 +26,11 @@ namespace Microsoft.PowerShell.EditorServices
     {
         #region Private Fields
 
-        private const int NumRunspaces = 2;
-        private RunspacePool analysisRunspacePool;
-        private PSModuleInfo scriptAnalyzerModuleInfo;
         private string[] activeRules;
         private string settingsPath;
+        private AnalysisServiceProvider analysisServiceProvider;
+        private bool isEnabled { get { return this.analysisServiceProvider != null; } }
+        private bool useSettingsFile { get { return this.settingsPath != null; } }
 
         /// <summary>
         /// Defines the list of Script Analyzer rules to include by default if
@@ -102,20 +103,8 @@ namespace Microsoft.PowerShell.EditorServices
             try
             {
                 this.SettingsPath = settingsPath;
-                var sessionState = InitialSessionState.CreateDefault2();
-
-                // runspacepool takes care of queuing commands for us so we do not
-                // need to worry about executing concurrent commands
-                this.analysisRunspacePool = RunspaceFactory.CreateRunspacePool(sessionState);
-
-                // having more than one runspace doesn't block code formatting if one
-                // runspace is occupied for diagnostics
-                this.analysisRunspacePool.SetMaxRunspaces(NumRunspaces);
-                this.analysisRunspacePool.ThreadOptions = PSThreadOptions.ReuseThread;
-                this.analysisRunspacePool.Open();
-
-                ActiveRules = IncludedRules.ToArray();
-                InitializePSScriptAnalyzer();
+                this.ActiveRules = IncludedRules.ToArray();
+                this.analysisServiceProvider = new AnalysisServiceProvider();
             }
             catch (Exception e)
             {
@@ -138,7 +127,21 @@ namespace Microsoft.PowerShell.EditorServices
         /// <returns>An array of ScriptFileMarkers containing semantic analysis results.</returns>
         public async Task<ScriptFileMarker[]> GetSemanticMarkersAsync(ScriptFile file)
         {
-            return await GetSemanticMarkersAsync(file, activeRules, settingsPath);
+            //return await GetSemanticMarkersAsync(file, activeRules, settingsPath);
+            if (isEnabled)
+            {
+                if (useSettingsFile)
+                {
+                    return await analysisServiceProvider.GetSemanticMarkersAsync(file, this.settingsPath);
+                }
+
+                return await analysisServiceProvider.GetSemanticMarkersAsync(
+                    file,
+                    GetPSSASettingsHashtableFromActiveRules());
+
+            }
+
+            return new ScriptFileMarker[0];
         }
 
         /// <summary>
@@ -149,7 +152,13 @@ namespace Microsoft.PowerShell.EditorServices
         /// <returns></returns>
         public async Task<ScriptFileMarker[]> GetSemanticMarkersAsync(ScriptFile file, Hashtable settings)
         {
-            return await GetSemanticMarkersAsync<Hashtable>(file, null, settings);
+            //return await GetSemanticMarkersAsync<Hashtable>(file, null, settings);
+            if (isEnabled)
+            {
+                return await analysisServiceProvider.GetSemanticMarkersAsync(file, settings);
+            }
+
+            return new ScriptFileMarker[0];
         }
 
         /// <summary>
@@ -157,17 +166,9 @@ namespace Microsoft.PowerShell.EditorServices
         /// </summary>
         public IEnumerable<string> GetPSScriptAnalyzerRules()
         {
-            List<string> ruleNames = new List<string>();
-            if (scriptAnalyzerModuleInfo != null)
-            {
-                var ruleObjects = InvokePowerShell("Get-ScriptAnalyzerRule", new Dictionary<string, object>());
-                foreach (var rule in ruleObjects)
-                {
-                    ruleNames.Add((string)rule.Members["RuleName"].Value);
-                }
-            }
-
-            return ruleNames;
+            var task = Task.Run(this.analysisServiceProvider.GetPSScriptAnalyzerRules);
+            task.Wait();
+            return task.Result;
         }
 
         /// <summary>
@@ -182,7 +183,6 @@ namespace Microsoft.PowerShell.EditorServices
 
             hashtable["IncludeRules"] = ruleSettingsMap.Keys.ToArray<object>();
             hashtable["Rules"] = ruleSettingsHashtable;
-
             foreach (var kvp in ruleSettingsMap)
             {
                 ruleSettingsHashtable.Add(kvp.Key, kvp.Value);
@@ -196,11 +196,9 @@ namespace Microsoft.PowerShell.EditorServices
         /// </summary>
         public void Dispose()
         {
-            if (this.analysisRunspacePool != null)
+            if (this.analysisServiceProvider != null)
             {
-                this.analysisRunspacePool.Close();
-                this.analysisRunspacePool.Dispose();
-                this.analysisRunspacePool = null;
+                this.analysisServiceProvider.Dispose();
             }
         }
 
@@ -208,196 +206,11 @@ namespace Microsoft.PowerShell.EditorServices
 
         #region Private Methods
 
-        private async Task<ScriptFileMarker[]> GetSemanticMarkersAsync<TSettings>(
-            ScriptFile file,
-            string[] rules,
-            TSettings settings) where TSettings : class
+        private Hashtable GetPSSASettingsHashtableFromActiveRules()
         {
-            if (this.scriptAnalyzerModuleInfo != null
-                && file.IsAnalysisEnabled
-                && (typeof(TSettings) == typeof(string) || typeof(TSettings) == typeof(Hashtable))
-                && (rules != null || settings != null))
-            {
-                var scriptFileMarkers = await GetDiagnosticRecordsAsync(file, rules, settings);
-                return scriptFileMarkers.Select(ScriptFileMarker.FromDiagnosticRecord).ToArray();
-            }
-            else
-            {
-                // Return an empty marker list
-                return new ScriptFileMarker[0];
-            }
-        }
-
-        private void FindPSScriptAnalyzer()
-        {
-            using (var ps = System.Management.Automation.PowerShell.Create())
-            {
-                ps.RunspacePool = this.analysisRunspacePool;
-
-                ps.AddCommand("Get-Module")
-                  .AddParameter("ListAvailable")
-                  .AddParameter("Name", "PSScriptAnalyzer");
-
-                ps.AddCommand("Sort-Object")
-                  .AddParameter("Descending")
-                  .AddParameter("Property", "Version");
-
-                ps.AddCommand("Select-Object")
-                  .AddParameter("First", 1);
-
-                var modules = ps.Invoke();
-
-                var psModule = modules == null ? null : modules.FirstOrDefault();
-                if (psModule != null)
-                {
-                    scriptAnalyzerModuleInfo = psModule.ImmediateBaseObject as PSModuleInfo;
-                    Logger.Write(
-                        LogLevel.Normal,
-                            string.Format(
-                                "PSScriptAnalyzer found at {0}",
-                                scriptAnalyzerModuleInfo.Path));
-                }
-                else
-                {
-                    Logger.Write(
-                        LogLevel.Normal,
-                        "PSScriptAnalyzer module was not found.");
-                }
-            }
-        }
-
-        private async Task<bool> ImportPSScriptAnalyzerAsync()
-        {
-            if (scriptAnalyzerModuleInfo != null)
-            {
-                var module =
-                    await InvokePowerShellAsync(
-                        "Import-Module",
-                        new Dictionary<string, object>
-                        {
-                            { "ModuleInfo", scriptAnalyzerModuleInfo },
-                            { "PassThru", true },
-                        });
-
-                if (module.Count() == 0)
-                {
-                    this.scriptAnalyzerModuleInfo = null;
-                    Logger.Write(LogLevel.Warning,
-                        String.Format("Cannot Import PSScriptAnalyzer: {0}"));
-
-                    return false;
-                }
-                else
-                {
-                    Logger.Write(LogLevel.Normal,
-                        String.Format(
-                            "Successfully imported PSScriptAnalyzer {0}",
-                            scriptAnalyzerModuleInfo.Version));
-
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private void EnumeratePSScriptAnalyzerRules()
-        {
-            if (scriptAnalyzerModuleInfo != null)
-            {
-                var rules = GetPSScriptAnalyzerRules();
-                var sb = new StringBuilder();
-                sb.AppendLine("Available PSScriptAnalyzer Rules:");
-                foreach (var rule in rules)
-                {
-                    sb.AppendLine(rule);
-                }
-
-                Logger.Write(LogLevel.Verbose, sb.ToString());
-            }
-        }
-
-        private void InitializePSScriptAnalyzer()
-        {
-            FindPSScriptAnalyzer();
-
-            List<Task> importTasks = new List<Task>();
-            for (int i = 0; i < NumRunspaces; i++)
-            {
-                importTasks.Add(
-                    ImportPSScriptAnalyzerAsync());
-            }
-
-            // Wait for the import requests to complete or fail
-            Task.WaitAll(importTasks.ToArray());
-
-            EnumeratePSScriptAnalyzerRules();
-        }
-
-        private async Task<IEnumerable<PSObject>> GetDiagnosticRecordsAsync<TSettings>(
-            ScriptFile file,
-            string[] rules,
-            TSettings settings) where TSettings : class
-        {
-            IEnumerable<PSObject> diagnosticRecords = Enumerable.Empty<PSObject>();
-
-            if (this.scriptAnalyzerModuleInfo != null
-                && (typeof(TSettings) == typeof(string)
-                    || typeof(TSettings) == typeof(Hashtable)))
-            {
-                //Use a settings file if one is provided, otherwise use the default rule list.
-                string settingParameter;
-                object settingArgument;
-                if (settings != null)
-                {
-                    settingParameter = "Settings";
-                    settingArgument = settings;
-                }
-                else
-                {
-                    settingParameter = "IncludeRule";
-                    settingArgument = rules;
-                }
-
-                diagnosticRecords = await InvokePowerShellAsync(
-                    "Invoke-ScriptAnalyzer",
-                    new Dictionary<string, object>
-                    {
-                        { "ScriptDefinition", file.Contents },
-                        { settingParameter, settingArgument }
-                    });
-            }
-
-            Logger.Write(
-                LogLevel.Verbose,
-                String.Format("Found {0} violations", diagnosticRecords.Count()));
-
-            return diagnosticRecords;
-        }
-
-        private IEnumerable<PSObject> InvokePowerShell(string command, IDictionary<string, object> paramArgMap)
-        {
-            using (var powerShell = System.Management.Automation.PowerShell.Create())
-            {
-                powerShell.RunspacePool = this.analysisRunspacePool;
-                powerShell.AddCommand(command);
-                foreach (var kvp in paramArgMap)
-                {
-                    powerShell.AddParameter(kvp.Key, kvp.Value);
-                }
-
-                return powerShell.Invoke() ?? Enumerable.Empty<PSObject>();
-            }
-        }
-
-        private async Task<IEnumerable<PSObject>> InvokePowerShellAsync(string command, IDictionary<string, object> paramArgMap)
-        {
-            var task = Task.Run<IEnumerable<PSObject>>(() =>
-            {
-                return InvokePowerShell(command, paramArgMap);
-            });
-
-            return await task ?? Enumerable.Empty<PSObject>();
+            var hashtable = new Hashtable();
+            hashtable["IncludeRules"] = this.ActiveRules.ToArray<object>();
+            return hashtable;
         }
 
         #endregion //private methods

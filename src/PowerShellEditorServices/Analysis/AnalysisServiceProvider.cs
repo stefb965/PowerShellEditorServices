@@ -22,7 +22,7 @@ namespace Microsoft.PowerShell.EditorServices.Analysis
         Task<ScriptFileMarker[]> GetSemanticMarkersAsync(ScriptFile file, string settingsFilePath);
     }
 
-    class AnalysisServiceProvider : IAnalysisServiceProvider, IDisposable
+    public class AnalysisServiceProvider : IAnalysisServiceProvider, IDisposable
     {
         private readonly int maxRunspaces = 1;
         private RunspacePool runspacePool;
@@ -62,6 +62,27 @@ namespace Microsoft.PowerShell.EditorServices.Analysis
         public async Task<ScriptFileMarker[]> GetSemanticMarkersAsync(ScriptFile file, string settingsFilePath)
         {
             return await GetScriptFileMarkersAsync<string> (file, settingsFilePath);
+        }
+
+        public async Task<string[]> GetPSScriptAnalyzerRules()
+        {
+            List<string> ruleNames = new List<string>();
+            if (isEnabled)
+            {
+                var ruleObjects = await InvokePowerShellAsync(
+                    "Get-ScriptAnalyzerRule",
+                    new Dictionary<string, object>());
+                foreach (dynamic rule in ruleObjects)
+                {
+                    var ruleName = rule.RuleName as string;
+                    if (ruleName != null)
+                    {
+                        ruleNames.Add(rule.RuleName);
+                    }
+                }
+            }
+
+            return ruleNames.ToArray();
         }
 
         private async Task<ScriptFileMarker[]> GetScriptFileMarkersAsync<TSettings>(
