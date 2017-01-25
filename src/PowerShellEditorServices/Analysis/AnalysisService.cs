@@ -25,9 +25,16 @@ namespace Microsoft.PowerShell.EditorServices
 
         private string[] activeRules;
         private string settingsPath;
-        private AnalysisServiceProvider analysisServiceProvider;
-        private bool isEnabled { get { return this.analysisServiceProvider != null; } }
-        private bool useSettingsFile { get { return this.settingsPath != null; } }
+        private IAnalysisServiceProvider analysisServiceProvider;
+        private IAnalysisServiceProvider formattingServiceProvider;
+        private bool isEnabled { get { return this.analysisServiceProvider != null && this.formattingServiceProvider != null; } }
+        private bool useSettingsFile
+        {
+            get
+            {
+                return this.settingsPath != null;
+            }
+        }
 
         /// <summary>
         /// Defines the list of Script Analyzer rules to include by default if
@@ -102,6 +109,7 @@ namespace Microsoft.PowerShell.EditorServices
                 this.SettingsPath = settingsPath;
                 this.ActiveRules = IncludedRules.ToArray();
                 this.analysisServiceProvider = new AnalysisServiceProvider();
+                this.formattingServiceProvider = new AnalysisServiceProvider();
             }
             catch (Exception e)
             {
@@ -149,7 +157,6 @@ namespace Microsoft.PowerShell.EditorServices
         /// <returns></returns>
         public async Task<ScriptFileMarker[]> GetSemanticMarkersAsync(ScriptFile file, Hashtable settings)
         {
-            //return await GetSemanticMarkersAsync<Hashtable>(file, null, settings);
             if (isEnabled)
             {
                 return await analysisServiceProvider.GetSemanticMarkersAsync(file, settings);
@@ -158,12 +165,25 @@ namespace Microsoft.PowerShell.EditorServices
             return new ScriptFileMarker[0];
         }
 
+        public async Task<ScriptFileMarker[]> GetSemanticMarkersForFormattingAsync(ScriptFile file, Hashtable settings)
+        {
+            //return await GetSemanticMarkersAsync<Hashtable>(file, null, settings);
+            if (isEnabled)
+            {
+                return await formattingServiceProvider.GetSemanticMarkersAsync(file, settings);
+            }
+
+            return new ScriptFileMarker[0];
+        }
+
+
+
         /// <summary>
         /// Returns a list of builtin-in PSScriptAnalyzer rules
         /// </summary>
         public IEnumerable<string> GetPSScriptAnalyzerRules()
         {
-            var task = Task.Run(this.analysisServiceProvider.GetPSScriptAnalyzerRules);
+            var task = Task.Run(this.analysisServiceProvider.GetAnalysisRules);
             task.Wait();
             return task.Result;
         }
@@ -193,9 +213,10 @@ namespace Microsoft.PowerShell.EditorServices
         /// </summary>
         public void Dispose()
         {
-            if (this.analysisServiceProvider != null)
+            if (isEnabled)
             {
                 this.analysisServiceProvider.Dispose();
+                this.formattingServiceProvider.Dispose();
             }
         }
 

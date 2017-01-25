@@ -10,19 +10,20 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Management.Automation;
 using System.Management.Automation.Runspaces;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace Microsoft.PowerShell.EditorServices.Analysis
 {
-    interface IAnalysisServiceProvider
+    interface IAnalysisServiceProvider : IDisposable
     {
         Task<ScriptFileMarker[]> GetSemanticMarkersAsync(ScriptFile file);
         Task<ScriptFileMarker[]> GetSemanticMarkersAsync(ScriptFile file, Hashtable settings);
         Task<ScriptFileMarker[]> GetSemanticMarkersAsync(ScriptFile file, string settingsFilePath);
+
+        Task<string[]> GetAnalysisRules();
     }
 
-    public class AnalysisServiceProvider : IAnalysisServiceProvider, IDisposable
+    public class AnalysisServiceProvider : IAnalysisServiceProvider
     {
         private readonly int maxRunspaces = 1;
         private RunspacePool runspacePool;
@@ -64,7 +65,7 @@ namespace Microsoft.PowerShell.EditorServices.Analysis
             return await GetScriptFileMarkersAsync<string> (file, settingsFilePath);
         }
 
-        public async Task<string[]> GetPSScriptAnalyzerRules()
+        public async Task<string[]> GetAnalysisRules()
         {
             List<string> ruleNames = new List<string>();
             if (isEnabled)
@@ -98,11 +99,11 @@ namespace Microsoft.PowerShell.EditorServices.Analysis
             return scriptFileMarkers.Select(ScriptFileMarker.FromDiagnosticRecord).ToArray();
         }
 
-        private async Task<IEnumerable<PSObject>> GetDiagnosticRecordsAsync<TSettings>(
+        private async Task<PSObject[]> GetDiagnosticRecordsAsync<TSettings>(
             ScriptFile file,
             TSettings settings) where TSettings : class
         {
-            IEnumerable<PSObject> diagnosticRecords = Enumerable.Empty<PSObject>();
+            PSObject[] diagnosticRecords = new PSObject[0];
 
             if (this.isEnabled
                 && (typeof(TSettings) == typeof(string)
@@ -159,7 +160,7 @@ namespace Microsoft.PowerShell.EditorServices.Analysis
             }
         }
 
-        private async Task<IEnumerable<PSObject>> InvokePowerShellAsync(
+        private async Task<PSObject[]> InvokePowerShellAsync(
             string command,
             IDictionary<string, object> paramArgMap)
         {
@@ -172,8 +173,13 @@ namespace Microsoft.PowerShell.EditorServices.Analysis
                     powerShell.AddParameter(kvp.Key, kvp.Value);
                 }
 
-                var task = Task.Factory.FromAsync(powerShell.BeginInvoke(), powerShell.EndInvoke);
-                return await task ?? Enumerable.Empty<PSObject>();
+                var objs = await Task.Factory.FromAsync(powerShell.BeginInvoke(), powerShell.EndInvoke);
+                if (objs != null)
+                {
+                    return objs.ToArray();
+                }
+
+                return new PSObject[0];
             }
         }
     }
