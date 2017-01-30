@@ -7,6 +7,9 @@ using Microsoft.CSharp.RuntimeBinder;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Management.Automation.Runspaces;
+using System.Collections.Generic;
+using System.Management.Automation;
+using System.Collections;
 
 namespace Microsoft.PowerShell.EditorServices.Session
 {
@@ -53,6 +56,13 @@ namespace Microsoft.PowerShell.EditorServices.Session
     /// </summary>
     public class RunspaceDetails
     {
+        #region Private Fields
+
+        private Dictionary<Type, IRunspaceCapability> capabilities =
+            new Dictionary<Type, IRunspaceCapability>();
+
+        #endregion
+
         #region Properties
 
         /// <summary>
@@ -132,6 +142,39 @@ namespace Microsoft.PowerShell.EditorServices.Session
         #endregion
 
         #region Public Methods
+
+        internal void AddCapability<TCapability>(TCapability capability)
+            where TCapability : IRunspaceCapability
+        {
+            this.capabilities.Add(typeof(TCapability), capability);
+        }
+
+        internal TCapability GetCapability<TCapability>()
+            where TCapability : IRunspaceCapability
+        {
+            TCapability capability = default(TCapability);
+            this.TryGetCapability<TCapability>(out capability);
+            return capability;
+        }
+
+        internal bool TryGetCapability<TCapability>(out TCapability capability)
+            where TCapability : IRunspaceCapability
+        {
+            IRunspaceCapability capabilityAsInterface = default(TCapability);
+            if (this.capabilities.TryGetValue(typeof(TCapability), out capabilityAsInterface))
+            {
+                capability = (TCapability)capabilityAsInterface;
+                return true;
+            }
+
+            capability = default(TCapability);
+            return false;
+        }
+
+        public bool HasCapability<TCapability>()
+        {
+            return this.capabilities.ContainsKey(typeof(TCapability));
+        }
 
         /// <summary>
         /// Creates and populates a new RunspaceDetails instance for the given runspace.
@@ -267,5 +310,4 @@ namespace Microsoft.PowerShell.EditorServices.Session
 
         #endregion
     }
-
 }

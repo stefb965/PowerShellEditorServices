@@ -22,6 +22,7 @@ namespace Microsoft.PowerShell.EditorServices
     using System.Management.Automation.Host;
     using System.Management.Automation.Runspaces;
     using System.Reflection;
+    using Microsoft.PowerShell.EditorServices.Session.Capabilities;
 
     /// <summary>
     /// Manages the lifetime and usage of a PowerShell session.
@@ -1605,6 +1606,9 @@ namespace Microsoft.PowerShell.EditorServices
 
             this.runspaceStack.Push(previousRunspace);
             this.CurrentRunspace = newRunspaceDetails;
+
+            // Check for runspace capabilities
+            DscBreakpointCapability.CheckForCapability(this.CurrentRunspace, this);
 
             this.OnRunspaceChanged(
                 this,
