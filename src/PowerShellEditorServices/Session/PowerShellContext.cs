@@ -21,8 +21,6 @@ namespace Microsoft.PowerShell.EditorServices
     using System.Management.Automation;
     using System.Management.Automation.Host;
     using System.Management.Automation.Runspaces;
-    using System.Reflection;
-    using Microsoft.PowerShell.EditorServices.Session.Capabilities;
 
     /// <summary>
     /// Manages the lifetime and usage of a PowerShell session.
@@ -36,6 +34,7 @@ namespace Microsoft.PowerShell.EditorServices
         private PowerShell powerShell;
         private bool ownsInitialRunspace;
         private RunspaceDetails initialRunspace;
+        private SessionDetails mostRecentSessionDetails;
 
         private IConsoleHost consoleHost;
         private ProfilePaths profilePaths;
@@ -110,6 +109,14 @@ namespace Microsoft.PowerShell.EditorServices
             private set;
         }
 
+        /// <summary>
+        /// Gets the prompt string for the current runspace.
+        /// </summary>
+        public string PromptString
+        {
+            get { return this.mostRecentSessionDetails.PromptString; }
+        }
+
         #endregion
 
         #region Constructors
@@ -145,24 +152,6 @@ namespace Microsoft.PowerShell.EditorServices
             this.ownsInitialRunspace = true;
 
             this.Initialize(profilePaths, runspace);
-
-            // Use reflection to execute ConsoleVisibility.AlwaysCaptureApplicationIO = true;
-            Type consoleVisibilityType =
-                Type.GetType(
-                    "System.Management.Automation.ConsoleVisibility, System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35");
-
-            if (consoleVisibilityType != null)
-            {
-                PropertyInfo propertyInfo =
-                    consoleVisibilityType.GetProperty(
-                        "AlwaysCaptureApplicationIO",
-                        BindingFlags.Static | BindingFlags.Public);
-
-                if (propertyInfo != null)
-                {
-                    propertyInfo.SetValue(null, true);
-                }
-            }
         }
 
         /// <summary>
@@ -356,6 +345,9 @@ namespace Microsoft.PowerShell.EditorServices
         /// <param name="sendErrorToHost">
         /// If true, causes any errors encountered during command execution to be written to the host.
         /// </param>
+        /// <param name="addToHistory">
+        /// If true, adds the command to the user's command history.
+        /// </param>
         /// <returns>
         /// An awaitable Task which will provide results once the command
         /// execution completes.
@@ -364,7 +356,8 @@ namespace Microsoft.PowerShell.EditorServices
             PSCommand psCommand,
             StringBuilder errorMessages,
             bool sendOutputToHost = false,
-            bool sendErrorToHost = true)
+            bool sendErrorToHost = true,
+            bool addToHistory = false)
         {
             RunspaceHandle runspaceHandle = null;
             IEnumerable<TResult> executionResult = Enumerable.Empty<TResult>();
@@ -436,7 +429,10 @@ namespace Microsoft.PowerShell.EditorServices
                                     try
                                     {
                                         this.powerShell.Commands = psCommand;
-                                        result = this.powerShell.Invoke<TResult>();
+
+                                        PSInvocationSettings invocationSettings = new PSInvocationSettings();
+                                        invocationSettings.AddToHistory = addToHistory;
+                                        result = this.powerShell.Invoke<TResult>(null, invocationSettings);
                                     }
                                     catch (RemoteException e)
                                     {
@@ -509,19 +505,15 @@ namespace Microsoft.PowerShell.EditorServices
                         if (runspaceHandle != null)
                         {
                             sessionDetails = this.GetSessionDetailsInRunspace(runspaceHandle.Runspace);
-                            this.WritePromptStringToHost(sessionDetails.PromptString);
                         }
                         else if (this.IsDebuggerStopped)
                         {
                             sessionDetails = this.GetSessionDetailsInDebugger();
-                            this.WritePromptInDebugger(sessionDetails);
                         }
                         else
                         {
                             sessionDetails = this.GetSessionDetailsInNestedPipeline();
-                            this.WritePromptStringToHost(sessionDetails.PromptString);
                         }
-
 
                         // Check if the runspace has changed
                         this.UpdateRunspaceDetailsIfSessionChanged(sessionDetails);
@@ -573,7 +565,7 @@ namespace Microsoft.PowerShell.EditorServices
             string scriptString,
             StringBuilder errorMessages)
         {
-            return this.ExecuteScriptString(scriptString, errorMessages, false, true);
+            return this.ExecuteScriptString(scriptString, errorMessages, false, true, false);
         }
 
         /// <summary>
@@ -588,7 +580,24 @@ namespace Microsoft.PowerShell.EditorServices
             bool writeInputToHost,
             bool writeOutputToHost)
         {
-            return this.ExecuteScriptString(scriptString, null, writeInputToHost, writeOutputToHost);
+            return this.ExecuteScriptString(scriptString, null, writeInputToHost, writeOutputToHost, false);
+        }
+
+        /// <summary>
+        /// Executes a script string in the session's runspace.
+        /// </summary>
+        /// <param name="scriptString">The script string to execute.</param>
+        /// <param name="writeInputToHost">If true, causes the script string to be written to the host.</param>
+        /// <param name="writeOutputToHost">If true, causes the script output to be written to the host.</param>
+        /// <param name="addToHistory">If true, adds the command to the user's command history.</param>
+        /// <returns>A Task that can be awaited for the script completion.</returns>
+        public Task<IEnumerable<object>> ExecuteScriptString(
+            string scriptString,
+            bool writeInputToHost,
+            bool writeOutputToHost,
+            bool addToHistory)
+        {
+            return this.ExecuteScriptString(scriptString, null, writeInputToHost, writeOutputToHost, addToHistory);
         }
 
         /// <summary>
@@ -598,12 +607,14 @@ namespace Microsoft.PowerShell.EditorServices
         /// <param name="errorMessages">Error messages from PowerShell will be written to the StringBuilder.</param>
         /// <param name="writeInputToHost">If true, causes the script string to be written to the host.</param>
         /// <param name="writeOutputToHost">If true, causes the script output to be written to the host.</param>
+        /// <param name="addToHistory">If true, adds the command to the user's command history.</param>
         /// <returns>A Task that can be awaited for the script completion.</returns>
         public async Task<IEnumerable<object>> ExecuteScriptString(
             string scriptString,
             StringBuilder errorMessages,
             bool writeInputToHost,
-            bool writeOutputToHost)
+            bool writeOutputToHost,
+            bool addToHistory)
         {
             if (writeInputToHost)
             {
@@ -619,7 +630,8 @@ namespace Microsoft.PowerShell.EditorServices
                 await this.ExecuteCommand<object>(
                     psCommand,
                     errorMessages,
-                    writeOutputToHost);
+                    writeOutputToHost,
+                    addToHistory: addToHistory);
         }
 
         /// <summary>
@@ -630,24 +642,16 @@ namespace Microsoft.PowerShell.EditorServices
         /// <returns>A Task that can be awaited for completion.</returns>
         public async Task ExecuteScriptAtPath(string scriptPath, string arguments = null)
         {
-            PSCommand command = new PSCommand();
+            // If we don't escape wildcard characters in the script path, the script can
+            // fail to execute if say the script name was foo][.ps1.
+            // Related to issue #123.
+            string escapedScriptPath = EscapePath(scriptPath, escapeSpaces: true);
 
-            if (arguments != null)
-            {
-                // If we don't escape wildcard characters in the script path, the script can
-                // fail to execute if say the script name was foo][.ps1.
-                // Related to issue #123.
-                string escapedScriptPath = EscapePath(scriptPath, escapeSpaces: true);
-                string scriptWithArgs = escapedScriptPath + " " + arguments;
-
-                command.AddScript(scriptWithArgs);
-            }
-            else
-            {
-                command.AddCommand(scriptPath);
-            }
-
-            await this.ExecuteCommand<object>(command, true);
+            await this.ExecuteScriptString(
+                $"{escapedScriptPath} {arguments}",
+                true,
+                true,
+                false);
         }
 
         internal static TResult ExecuteScriptAndGetItem<TResult>(string scriptToExecute, Runspace runspace, TResult defaultValue = default(TResult))
@@ -712,6 +716,10 @@ namespace Microsoft.PowerShell.EditorServices
                     command.AddCommand(profilePath, false);
                     await this.ExecuteCommand(command);
                 }
+
+                // Gather the session details (particularly the prompt) after
+                // loading the user's profiles.
+                await this.GetSessionDetailsInRunspace();
             }
         }
 
@@ -1242,9 +1250,18 @@ namespace Microsoft.PowerShell.EditorServices
         {
             try
             {
-                return new SessionDetails(
-                    invokeAction(
-                        SessionDetails.GetDetailsCommand()));
+                // TODO: This is a temporary hack that should be changed once
+                // the PSHost/PowerShellContext interface is refactored
+                this.WriteOutput(
+                    Environment.NewLine,
+                    false);
+
+                this.mostRecentSessionDetails =
+                    new SessionDetails(
+                        invokeAction(
+                            SessionDetails.GetDetailsCommand()));
+
+                return this.mostRecentSessionDetails;
             }
             catch (RuntimeException e)
             {
@@ -1254,7 +1271,16 @@ namespace Microsoft.PowerShell.EditorServices
             }
 
             // TODO: Return a harmless object if necessary
-            return null;
+            this.mostRecentSessionDetails = null;
+            return this.mostRecentSessionDetails;
+        }
+
+        private async Task<SessionDetails> GetSessionDetailsInRunspace()
+        {
+            using (RunspaceHandle runspaceHandle = await this.GetRunspaceHandle())
+            {
+                return this.GetSessionDetailsInRunspace(runspaceHandle.Runspace);
+            }
         }
 
         private SessionDetails GetSessionDetailsInRunspace(Runspace runspace)
@@ -1318,58 +1344,6 @@ namespace Microsoft.PowerShell.EditorServices
                                 .Invoke()
                                 .FirstOrDefault();
                     });
-            }
-        }
-
-        private void WritePromptStringToHost(string promptString)
-        {
-            this.WriteOutput(
-                Environment.NewLine,
-                false);
-
-            // Write the prompt string
-            this.WriteOutput(
-                promptString,
-                true);
-        }
-
-        private void WritePromptInDebugger(SessionDetails sessionDetails, DebuggerStopEventArgs eventArgs = null)
-        {
-            string promptPrefix = string.Empty;
-            string promptString = sessionDetails.PromptString;
-
-            if (eventArgs != null && promptString.Length > 0)
-            {
-                // Is there a prompt prefix worth keeping?
-                const string promptSeparator = "]: ";
-                if (promptString != null && promptString[0] == ('['))
-                {
-                    int separatorIndex = promptString.LastIndexOf(promptSeparator);
-                    if (separatorIndex > 0)
-                    {
-                        promptPrefix =
-                            promptString.Substring(
-                                0,
-                                separatorIndex + promptSeparator.Length);
-                    }
-                }
-
-                // This was called from OnDebuggerStop, write a different prompt
-                if (eventArgs.Breakpoints.Count > 0)
-                {
-                    // The breakpoint classes have nice ToString output so use that
-                    promptString = $"Hit {eventArgs.Breakpoints[0].ToString()}";
-                }
-                else
-                {
-                    // TODO: What do we display when we don't know why we stopped?
-                    promptString = null;
-                }
-            }
-
-            if (promptString != null)
-            {
-                this.WritePromptStringToHost(promptPrefix + promptString);
             }
         }
 
@@ -1440,6 +1414,7 @@ namespace Microsoft.PowerShell.EditorServices
         // NOTE: This event is 'internal' because the DebugService provides
         //       the publicly consumable event.
         internal event EventHandler<DebuggerStopEventArgs> DebuggerStop;
+        internal event EventHandler<DebuggerResumeAction> DebuggerResumed;
 
         private void OnDebuggerStop(object sender, DebuggerStopEventArgs e)
         {
@@ -1461,9 +1436,9 @@ namespace Microsoft.PowerShell.EditorServices
                     PowerShellExecutionResult.Stopped,
                     null));
 
-            // Get the session details an write out the debugger prompt
+            // Get the session details and push the current
+            // runspace if the session has changed
             var sessionDetails = this.GetSessionDetailsInDebugger();
-            this.WritePromptInDebugger(sessionDetails, e);
 
             // Push the current runspace if the session has changed
             this.UpdateRunspaceDetailsIfSessionChanged(sessionDetails, isDebuggerStop: true);
@@ -1487,6 +1462,9 @@ namespace Microsoft.PowerShell.EditorServices
 
                     e.ResumeAction = this.debuggerStoppedTask.Task.Result;
                     Logger.Write(LogLevel.Verbose, "Received debugger resume action " + e.ResumeAction.ToString());
+
+                    // Notify listeners that the debugger has resumed
+                    this.DebuggerResumed?.Invoke(this, e.ResumeAction);
 
                     break;
                 }
