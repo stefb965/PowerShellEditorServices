@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 namespace Microsoft.PowerShell.EditorServices.Session.Capabilities
 {
+    using Microsoft.PowerShell.EditorServices.Utility;
     using System;
     using System.Collections.Generic;
     using System.Collections.ObjectModel;
@@ -94,9 +95,21 @@ namespace Microsoft.PowerShell.EditorServices.Session.Capabilities
                     powerShell.AddParameter("PassThru");
                     powerShell.AddParameter("ErrorAction", "SilentlyContinue");
 
-                    PSObject moduleInfo = powerShell.Invoke().FirstOrDefault();
+                    PSObject moduleInfo = null;
+
+                    try
+                    {
+                        moduleInfo = powerShell.Invoke().FirstOrDefault();
+                    }
+                    catch (CmdletInvocationException e)
+                    {
+                        Logger.WriteException("Could not load the DSC module!", e);
+                    }
+
                     if (moduleInfo != null)
                     {
+                        Logger.Write(LogLevel.Verbose, "Side-by-side DSC module found, gathering DSC resource paths...");
+
                         // The module was loaded, add the breakpoint capability
                         capability = new DscBreakpointCapability();
                         runspaceDetails.AddCapability(capability);
@@ -111,14 +124,34 @@ namespace Microsoft.PowerShell.EditorServices.Session.Capabilities
                         powerShell.AddCommand("Select-Object");
                         powerShell.AddParameter("ExpandProperty", "ParentPath");
 
-                        Collection<PSObject> resourcePaths = powerShell.Invoke();
+                        Collection<PSObject> resourcePaths = null;
+
+                        try
+                        {
+                            resourcePaths = powerShell.Invoke();
+                        }
+                        catch (CmdletInvocationException e)
+                        {
+                            Logger.WriteException("Get-DscResource failed!", e);
+                        }
+
                         if (resourcePaths != null)
                         {
                             capability.dscResourceRootPaths =
                                 resourcePaths
                                     .Select(o => (string)o.BaseObject)
                                     .ToArray();
+
+                            Logger.Write(LogLevel.Verbose, $"DSC resources found: {resourcePaths.Count}");
                         }
+                        else
+                        {
+                            Logger.Write(LogLevel.Verbose, $"No DSC resources found.");
+                        }
+                    }
+                    else
+                    {
+                        Logger.Write(LogLevel.Verbose, $"Side-by-side DSC module was not found.");
                     }
                 }
             }

@@ -237,6 +237,9 @@ namespace Microsoft.PowerShell.EditorServices
             // Set up the runspace
             this.ConfigureRunspace(this.CurrentRunspace);
 
+            // Add runspace capabilities
+            this.ConfigureRunspaceCapabilities(this.CurrentRunspace);
+
             // Set the $profile variable in the runspace
             this.profilePaths = profilePaths;
             if (this.profilePaths != null)
@@ -1582,6 +1585,11 @@ namespace Microsoft.PowerShell.EditorServices
             }
         }
 
+        private void ConfigureRunspaceCapabilities(RunspaceDetails runspaceDetails)
+        {
+            DscBreakpointCapability.CheckForCapability(this.CurrentRunspace, this);
+        }
+
         private void PushRunspace(RunspaceDetails newRunspaceDetails)
         {
             Logger.Write(
@@ -1608,7 +1616,7 @@ namespace Microsoft.PowerShell.EditorServices
             this.CurrentRunspace = newRunspaceDetails;
 
             // Check for runspace capabilities
-            DscBreakpointCapability.CheckForCapability(this.CurrentRunspace, this);
+            this.ConfigureRunspaceCapabilities(newRunspaceDetails);
 
             this.OnRunspaceChanged(
                 this,
