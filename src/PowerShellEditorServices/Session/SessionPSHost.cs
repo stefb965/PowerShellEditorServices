@@ -17,34 +17,26 @@ namespace Microsoft.PowerShell.EditorServices
     /// ConsoleService and routes its calls to an IConsoleHost
     /// implementation.
     /// </summary>
-    internal class ConsoleServicePSHost : PSHost, IHostSupportsInteractiveSession
+    public class ConsoleServicePSHost : PSHost, IHostSupportsInteractiveSession
     {
         #region Private Fields
 
         private HostDetails hostDetails;
-        private IConsoleHost consoleHost;
         private bool isNativeApplicationRunning;
         private Guid instanceId = Guid.NewGuid();
-        private ConsoleServicePSHostUserInterface hostUserInterface;
+        private PSHostUserInterface hostUserInterface;
         private IHostSupportsInteractiveSession hostSupportsInteractiveSession;
 
         #endregion
 
-        #region Properties
-
-        internal IConsoleHost ConsoleHost
-        {
-            get { return this.consoleHost; }
-            set
-            {
-                this.consoleHost = value;
-                this.hostUserInterface.ConsoleHost = value;
-            }
-        }
-
-        #endregion
-
         #region Constructors
+
+        /// <summary>
+        /// Creates a new instance of the ConsoleServicePSHost class
+        /// </summary>
+        public ConsoleServicePSHost() : this(null, null)
+        {
+        }
 
         /// <summary>
         /// Creates a new instance of the ConsoleServicePSHost class
@@ -53,30 +45,37 @@ namespace Microsoft.PowerShell.EditorServices
         /// <param name="hostDetails">
         /// Provides details about the host application.
         /// </param>
+        public ConsoleServicePSHost(IConsoleHost consoleHost, HostDetails hostDetails)
+        {
+            this.hostDetails = hostDetails ?? HostDetails.Default;
+            this.hostUserInterface = new ConsoleServicePSHostUserInterface(consoleHost);
+
+            System.Console.CancelKeyPress +=
+               (obj, args) =>
+               {
+                   if (!this.isNativeApplicationRunning)
+                   {
+                        // We'll handle Ctrl+C
+                        if (consoleHost != null)
+                        {
+                            args.Cancel = true;
+                            consoleHost.SendControlC();
+                        }
+                   }
+               };
+        }
+
+        #endregion
+
+        #region Public Methods
+
+        /// </param>
         /// <param name="hostSupportsInteractiveSession">
         /// An implementation of IHostSupportsInteractiveSession for runspace management.
         /// </param>
-        public ConsoleServicePSHost(
-            HostDetails hostDetails,
-            IHostSupportsInteractiveSession hostSupportsInteractiveSession)
+        public void Initialize(IHostSupportsInteractiveSession hostSupportsInteractiveSession)
         {
-            this.hostDetails = hostDetails;
-            this.hostUserInterface = new ConsoleServicePSHostUserInterface();
             this.hostSupportsInteractiveSession = hostSupportsInteractiveSession;
-
-            System.Console.CancelKeyPress +=
-                (obj, args) =>
-                {
-                    if (!this.isNativeApplicationRunning)
-                    {
-                        // We'll handle Ctrl+C
-                        if (this.ConsoleHost != null)
-                        {
-                            args.Cancel = true;
-                            this.consoleHost.SendControlC();
-                        }
-                    }
-                };
         }
 
         #endregion
@@ -97,8 +96,6 @@ namespace Microsoft.PowerShell.EditorServices
         {
             get { return this.hostDetails.Version; }
         }
-
-        // TODO: Pull these from IConsoleHost
 
         public override System.Globalization.CultureInfo CurrentCulture
         {
@@ -139,11 +136,6 @@ namespace Microsoft.PowerShell.EditorServices
 
         public override void SetShouldExit(int exitCode)
         {
-            if (this.consoleHost != null)
-            {
-                this.consoleHost.ExitSession(exitCode);
-            }
-
             if (this.IsRunspacePushed)
             {
                 this.PopRunspace();

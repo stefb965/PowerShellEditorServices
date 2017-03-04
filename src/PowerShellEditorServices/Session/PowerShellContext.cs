@@ -3,7 +3,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 //
 
-using Microsoft.PowerShell.EditorServices.Console;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Globalization;
@@ -37,9 +36,8 @@ namespace Microsoft.PowerShell.EditorServices
         private RunspaceDetails initialRunspace;
         private SessionDetails mostRecentSessionDetails;
 
-        private IConsoleHost consoleHost;
+        private PSHost psHost;
         private ProfilePaths profilePaths;
-        private ConsoleServicePSHost psHost;
 
         private IVersionSpecificOperations versionSpecificOperations;
 
@@ -90,20 +88,6 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         /// <summary>
-        /// Gets or sets an IConsoleHost implementation for use in
-        /// writing output to the console.
-        /// </summary>
-        internal IConsoleHost ConsoleHost
-        {
-            get { return this.consoleHost; }
-            set
-            {
-                this.consoleHost = value;
-                this.psHost.ConsoleHost = value;
-            }
-        }
-
-        /// <summary>
         /// Gets details pertaining to the current runspace.
         /// </summary>
         public RunspaceDetails CurrentRunspace
@@ -128,7 +112,7 @@ namespace Microsoft.PowerShell.EditorServices
         /// Initializes a new instance of the PowerShellContext class and
         /// opens a runspace to be used for the session.
         /// </summary>
-        public PowerShellContext() : this((HostDetails)null, null)
+        public PowerShellContext() : this((PSHost)null, null)
         {
         }
 
@@ -139,13 +123,27 @@ namespace Microsoft.PowerShell.EditorServices
         /// <param name="hostDetails">Provides details about the host application.</param>
         /// <param name="profilePaths">An object containing the profile paths for the session.</param>
         public PowerShellContext(HostDetails hostDetails, ProfilePaths profilePaths)
+            : this(
+                  new ConsoleServicePSHost(null, hostDetails),
+                  profilePaths)
         {
-            hostDetails = hostDetails ?? HostDetails.Default;
+        }
 
-            this.psHost = new ConsoleServicePSHost(hostDetails, this);
+        /// <summary>
+        /// Initializes a new instance of the PowerShellContext class and
+        /// opens a runspace to be used for the session.
+        /// </summary>
+        /// <param name="hostDetails">Provides details about the host application.</param>
+        /// <param name="profilePaths">An object containing the profile paths for the session.</param>
+        public PowerShellContext(PSHost psHost, ProfilePaths profilePaths)
+        {
+            this.psHost = psHost;
+            ConsoleServicePSHost consoleServicePSHost = psHost as ConsoleServicePSHost;
+            consoleServicePSHost?.Initialize(this);
+
             var initialSessionState = InitialSessionState.CreateDefault2();
 
-            Runspace runspace = RunspaceFactory.CreateRunspace(psHost, initialSessionState);
+            Runspace runspace = RunspaceFactory.CreateRunspace(this.psHost, initialSessionState);
 #if !CoreCLR
             runspace.ApartmentState = ApartmentState.STA;
 #endif
@@ -1031,23 +1029,16 @@ namespace Microsoft.PowerShell.EditorServices
 
         internal void WriteOutput(string outputString, bool includeNewLine)
         {
-            this.WriteOutput(
-                outputString,
-                includeNewLine,
-                OutputType.Normal);
-        }
-
-        internal void WriteOutput(
-            string outputString,
-            bool includeNewLine,
-            OutputType outputType)
-        {
-            if (this.ConsoleHost != null)
+            if (this.psHost != null)
             {
-                this.ConsoleHost.WriteOutput(
-                    outputString,
-                    includeNewLine,
-                    outputType);
+                if (includeNewLine)
+                {
+                    this.psHost.UI.WriteLine(outputString);
+                }
+                else
+                {
+                    this.psHost.UI.Write(outputString);
+                }
             }
         }
 
@@ -1112,14 +1103,9 @@ namespace Microsoft.PowerShell.EditorServices
 
         private void WriteError(string errorMessage)
         {
-            if (this.ConsoleHost != null)
+            if (this.psHost != null)
             {
-                this.ConsoleHost.WriteOutput(
-                    errorMessage,
-                    true,
-                    OutputType.Error,
-                    ConsoleColor.Red,
-                    ConsoleColor.Black);
+                this.psHost.UI.WriteErrorLine(errorMessage);
             }
         }
 

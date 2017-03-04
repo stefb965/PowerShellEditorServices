@@ -12,6 +12,8 @@ namespace Microsoft.PowerShell.EditorServices.Console
 {
     using System;
     using System.Management.Automation;
+    using System.Management.Automation.Host;
+    using System.Security;
 
     /// <summary>
     /// Provides a high-level service for exposing an interactive
@@ -22,7 +24,7 @@ namespace Microsoft.PowerShell.EditorServices.Console
         #region Fields
 
         private ConsoleReadLine consoleReadLine;
-        private PowerShellContext powerShellContext;
+        //private PowerShellContext powerShellContext;
 
         CancellationTokenSource readLineCancellationToken;
 
@@ -41,10 +43,10 @@ namespace Microsoft.PowerShell.EditorServices.Console
         /// The PowerShellContext that will be used for executing commands
         /// against a runspace.
         /// </param>
-        public ConsoleService(PowerShellContext powerShellContext)
-            : this(powerShellContext, null)
-        {
-        }
+        //public ConsoleService(PowerShellContext powerShellContext)
+        //    : this(powerShellContext, null)
+        //{
+        //}
 
         /// <summary>
         /// Creates a new instance of the ConsoleService class.
@@ -57,29 +59,23 @@ namespace Microsoft.PowerShell.EditorServices.Console
         /// The default IPromptHandlerContext implementation to use for
         /// displaying prompts to the user.
         /// </param>
-        public ConsoleService(
-            PowerShellContext powerShellContext,
-            IPromptHandlerContext defaultPromptHandlerContext)
+        public ConsoleService()
+            //PowerShellContext powerShellContext,
+            //IPromptHandlerContext defaultPromptHandlerContext)
         {
             // Register this instance as the IConsoleHost for the PowerShellContext
-            this.powerShellContext = powerShellContext;
-            this.powerShellContext.ConsoleHost = this;
-            this.powerShellContext.DebuggerStop += PowerShellContext_DebuggerStop;
-            this.powerShellContext.DebuggerResumed += PowerShellContext_DebuggerResumed;
+            //this.powerShellContext = powerShellContext;
+            //this.powerShellContext.DebuggerStop += PowerShellContext_DebuggerStop;
+            //this.powerShellContext.DebuggerResumed += PowerShellContext_DebuggerResumed;
 
             // Set the default prompt handler factory or create
             // a default if one is not provided
-            if (defaultPromptHandlerContext == null)
-            {
-                defaultPromptHandlerContext =
-                    new ConsolePromptHandlerContext(this);
-            }
+            var defaultPromptHandlerContext = new ConsolePromptHandlerContext(this);
 
             this.promptHandlerContextStack.Push(
                 defaultPromptHandlerContext);
 
-            this.consoleReadLine = new ConsoleReadLine(powerShellContext);
-
+            this.consoleReadLine = new ConsoleReadLine();
         }
 
         #endregion
@@ -127,45 +123,6 @@ namespace Microsoft.PowerShell.EditorServices.Console
         }
 
         /// <summary>
-        /// Called when a command string is received from the user.
-        /// If a prompt is currently active, the prompt handler is
-        /// asked to handle the string.  Otherwise the string is
-        /// executed in the PowerShellContext.
-        /// </summary>
-        /// <param name="inputString">The input string to evaluate.</param>
-        /// <param name="echoToConsole">If true, the input will be echoed to the console.</param>
-        public void ExecuteCommand(string inputString, bool echoToConsole)
-        {
-            this.CancelReadLoop();
-
-            if (this.activePromptHandler != null)
-            {
-                if (echoToConsole)
-                {
-                    this.WriteOutput(inputString, true);
-                }
-
-                if (this.activePromptHandler.HandleResponse(inputString))
-                {
-                    // If the prompt handler is finished, clear it for
-                    // future input events
-                    this.activePromptHandler = null;
-                }
-            }
-            else
-            {
-                // Execute the script string but don't wait for completion
-                var executeTask =
-                    this.powerShellContext
-                        .ExecuteScriptString(
-                            inputString,
-                            echoToConsole,
-                            true)
-                        .ConfigureAwait(false);
-            }
-        }
-
-        /// <summary>
         /// Executes a script file at the specified path.
         /// </summary>
         /// <param name="scriptPath">The path to the script file to execute.</param>
@@ -173,39 +130,20 @@ namespace Microsoft.PowerShell.EditorServices.Console
         /// <returns>A Task that can be awaited for completion.</returns>
         public async Task ExecuteScriptAtPath(string scriptPath, string arguments = null)
         {
-            this.CancelReadLoop();
+            //this.CancelReadLoop();
 
-            // If we don't escape wildcard characters in the script path, the script can
-            // fail to execute if say the script name was foo][.ps1.
-            // Related to issue #123.
-            string escapedScriptPath = PowerShellContext.EscapePath(scriptPath, escapeSpaces: true);
+            //// If we don't escape wildcard characters in the script path, the script can
+            //// fail to execute if say the script name was foo][.ps1.
+            //// Related to issue #123.
+            //string escapedScriptPath = PowerShellContext.EscapePath(scriptPath, escapeSpaces: true);
 
-            await this.powerShellContext.ExecuteScriptString(
-                $"{escapedScriptPath} {arguments}",
-                true,
-                true,
-                false);
+            //await this.powerShellContext.ExecuteScriptString(
+            //    $"{escapedScriptPath} {arguments}",
+            //    true,
+            //    true,
+            //    false);
 
-            this.StartReadLoop();
-        }
-
-        /// <summary>
-        /// Provides a direct path for a caller that just wants to provide
-        /// user response to a prompt without executing a command if there
-        /// is no active prompt.
-        /// </summary>
-        /// <param name="promptResponse">The user's response to the active prompt.</param>
-        /// <param name="echoToConsole">If true, the input will be echoed to the console.</param>
-        /// <returns>True if there was a prompt, false otherwise.</returns>
-        public bool ReceivePromptResponse(string promptResponse, bool echoToConsole)
-        {
-            if (this.activePromptHandler != null)
-            {
-                this.ExecuteCommand(promptResponse, echoToConsole);
-                return true;
-            }
-
-            return false;
+            //this.StartReadLoop();
         }
 
         /// <summary>
@@ -253,6 +191,20 @@ namespace Microsoft.PowerShell.EditorServices.Console
             }
         }
 
+        public async Task<string> ReadSimpleLine(CancellationToken cancellationToken)
+        {
+            string inputLine = await this.consoleReadLine.ReadSimpleLine(cancellationToken);
+            this.WriteOutput(string.Empty, true);
+            return inputLine;
+        }
+
+        public async Task<SecureString> ReadSecureLine(CancellationToken cancellationToken)
+        {
+            SecureString secureString = await this.consoleReadLine.ReadSecureLine(cancellationToken);
+            this.WriteOutput(string.Empty, true);
+            return secureString;
+        }
+
         #endregion
 
         #region Private Methods
@@ -260,9 +212,9 @@ namespace Microsoft.PowerShell.EditorServices.Console
         private void WritePromptStringToHost()
         {
             // Write the prompt string
-            this.WriteOutput(
-                this.powerShellContext.PromptString,
-                false);
+            //this.WriteOutput(
+            //    this.powerShellContext.PromptString,
+            //    false);
         }
 
         private void WriteDebuggerBanner(DebuggerStopEventArgs eventArgs)
@@ -290,9 +242,9 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
                 try
                 {
-                    commandString =
-                        await this.consoleReadLine.ReadCommandLine(
-                            cancellationToken);
+                    //commandString =
+                    //    await this.consoleReadLine.ReadCommandLine(
+                    //        cancellationToken);
                 }
                 catch (Exception e) // Narrow this if possible
                 {
@@ -306,13 +258,13 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
                 if (commandString != null)
                 {
-                    Console.Write(Environment.NewLine);
+                    //Console.Write(Environment.NewLine);
 
-                    await this.powerShellContext.ExecuteScriptString(
-                        commandString,
-                        false,
-                        true,
-                        true);
+                    //await this.powerShellContext.ExecuteScriptString(
+                    //    commandString,
+                    //    false,
+                    //    true,
+                    //    true);
                 }
             }
             while (!cancellationToken.IsCancellationRequested);
@@ -332,6 +284,11 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
         #region IConsoleHost Implementation
 
+        PSHostRawUserInterface IConsoleHost.GetRawUI()
+        {
+            return new ConsoleServicePSHostRawUserInterface();
+        }
+
         void IConsoleHost.WriteOutput(string outputString, bool includeNewLine, OutputType outputType, ConsoleColor foregroundColor, ConsoleColor backgroundColor)
         {
             ConsoleColor oldForegroundColor = Console.ForegroundColor;
@@ -344,26 +301,9 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
             Console.ForegroundColor = oldForegroundColor;
             Console.BackgroundColor = oldBackgroundColor;
-
-            if (this.OutputWritten != null)
-            {
-                this.OutputWritten(
-                    this,
-                    new OutputWrittenEventArgs(
-                        outputString,
-                        includeNewLine,
-                        outputType,
-                        foregroundColor,
-                        backgroundColor));
-            }
         }
 
         void IConsoleHost.UpdateProgress(long sourceId, ProgressDetails progressDetails)
-        {
-            //throw new NotImplementedException();
-        }
-
-        void IConsoleHost.ExitSession(int exitCode)
         {
             //throw new NotImplementedException();
         }

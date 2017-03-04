@@ -21,31 +21,28 @@ namespace Microsoft.PowerShell.EditorServices.Console
     {
         #region Private Fields
 
-        private PowerShellContext powerShellContext;
         private AsyncQueue<ConsoleKeyInfo> readKeyQueue = new AsyncQueue<ConsoleKeyInfo>();
-        private CancellationTokenSource readLoopCancellationToken;
 
         #endregion
 
         #region Constructors
 
-        public ConsoleReadLine(PowerShellContext powerShellContext)
+        public ConsoleReadLine()
         {
-            this.powerShellContext = powerShellContext;
         }
 
         #endregion
 
         #region Public Methods
 
-        public Task<string> ReadCommandLine(CancellationToken cancellationToken)
+        public Task<string> ReadCommandLine(PowerShellContext powerShellContext, CancellationToken cancellationToken)
         {
-            return this.ReadLine(true, cancellationToken);
+            return this.ReadLine(true, powerShellContext, cancellationToken);
         }
 
         public Task<string> ReadSimpleLine(CancellationToken cancellationToken)
         {
-            return this.ReadLine(false, cancellationToken);
+            return this.ReadLine(false, null, cancellationToken);
         }
 
         public async Task<SecureString> ReadSecureLine(CancellationToken cancellationToken)
@@ -135,7 +132,10 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
         #region Private Methods
 
-        private async Task<string> ReadLine(bool isCommandLine, CancellationToken cancellationToken)
+        private async Task<string> ReadLine(
+            bool isCommandLine,
+            PowerShellContext powerShellContext,
+            CancellationToken cancellationToken)
         {
             string inputBeforeCompletion = null;
             string inputAfterCompletion = null;
@@ -198,7 +198,7 @@ namespace Microsoft.PowerShell.EditorServices.Console
 
                         // TODO: This logic should be moved to AstOperations or similar!
 
-                        if (this.powerShellContext.IsDebuggerStopped)
+                        if (powerShellContext.IsDebuggerStopped)
                         {
                             PSCommand command = new PSCommand();
                             command.AddCommand("TabExpansion2");
@@ -207,13 +207,13 @@ namespace Microsoft.PowerShell.EditorServices.Console
                             command.AddParameter("Options", null);
 
                             var results =
-                                await this.powerShellContext.ExecuteCommand<CommandCompletion>(command, false, false);
+                                await powerShellContext.ExecuteCommand<CommandCompletion>(command, false, false);
 
                             currentCompletion = results.FirstOrDefault();
                         }
                         else
                         {
-                            using (RunspaceHandle runspaceHandle = await this.powerShellContext.GetRunspaceHandle())
+                            using (RunspaceHandle runspaceHandle = await powerShellContext.GetRunspaceHandle())
                             using (PowerShell powerShell = PowerShell.Create())
                             {
                                 powerShell.Runspace = runspaceHandle.Runspace;
@@ -314,7 +314,7 @@ namespace Microsoft.PowerShell.EditorServices.Console
                         command.AddCommand("Get-History");
 
                         currentHistory =
-                            await this.powerShellContext.ExecuteCommand<PSObject>(
+                            await powerShellContext.ExecuteCommand<PSObject>(
                                 command,
                                 false,
                                 false) as Collection<PSObject>;

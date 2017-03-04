@@ -7,7 +7,6 @@ using Microsoft.PowerShell.EditorServices.Utility;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.PowerShell.EditorServices.Console;
 using System.Management.Automation.Runspaces;
 using System.Management.Automation;
 using System.Collections.Generic;
@@ -102,10 +101,9 @@ namespace Microsoft.PowerShell.EditorServices
         /// <summary>
         /// Creates an instance of the AnalysisService class.
         /// </summary>
-        /// <param name="consoleHost">An object that implements IConsoleHost in which to write errors/warnings
         /// from analyzer.</param>
         /// <param name="settingsPath">Path to a PSScriptAnalyzer settings file.</param>
-        public AnalysisService(IConsoleHost consoleHost, string settingsPath = null)
+        public AnalysisService(string settingsPath = null)
         {
             try
             {

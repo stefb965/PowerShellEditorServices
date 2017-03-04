@@ -10,7 +10,6 @@ using Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol;
 using Microsoft.PowerShell.EditorServices.Utility;
 using System.Threading.Tasks;
 using System.Threading;
-using System.Security;
 
 namespace Microsoft.PowerShell.EditorServices.Protocol.Server
 {

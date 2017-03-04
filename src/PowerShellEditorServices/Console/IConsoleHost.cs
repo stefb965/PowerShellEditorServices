@@ -4,6 +4,7 @@
 //
 
 using System;
+using System.Management.Automation.Host;
 using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
@@ -43,6 +44,8 @@ namespace Microsoft.PowerShell.EditorServices.Console
             ConsoleColor foregroundColor,
             ConsoleColor backgroundColor);
 
+        //IPromptHandlerContext GetPromptHandlerContext();
+
         /// <summary>
         /// Creates a ChoicePromptHandler to use for displaying a
         /// choice prompt to the user.
@@ -57,11 +60,15 @@ namespace Microsoft.PowerShell.EditorServices.Console
         /// <returns>A new InputPromptHandler instance.</returns>
         InputPromptHandler GetInputPromptHandler();
 
+        //Task<string> ReadCommandLine(PowerShellContext powerShellContext);
+
         Task<string> ReadSimpleLine(CancellationToken cancellationToken);
 
         Task<SecureString> ReadSecureLine(CancellationToken cancellationToken);
 
         void SendControlC();
+
+        PSHostRawUserInterface GetRawUI();
 
         /// <summary>
         /// Sends a progress update event to the user.
@@ -71,13 +78,6 @@ namespace Microsoft.PowerShell.EditorServices.Console
         void UpdateProgress(
             long sourceId,
             ProgressDetails progressDetails);
-
-        /// <summary>
-        /// Notifies the IConsoleHost implementation that the PowerShell
-        /// session is exiting.
-        /// </summary>
-        /// <param name="exitCode">The error code that identifies the session exit result.</param>
-        void ExitSession(int exitCode);
     }
 
     /// <summary>

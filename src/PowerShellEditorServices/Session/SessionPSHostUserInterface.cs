@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 //
@@ -10,9 +10,9 @@ using System.Management.Automation;
 using System.Management.Automation.Host;
 using System.Linq;
 using System.Security;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.PowerShell.EditorServices.Console;
-using System.Threading;
 
 namespace Microsoft.PowerShell.EditorServices
 {
@@ -26,21 +26,7 @@ namespace Microsoft.PowerShell.EditorServices
         #region Private Fields
 
         private IConsoleHost consoleHost;
-        private ConsoleServicePSHostRawUserInterface rawUserInterface;
-
-        #endregion
-
-        #region Properties
-
-        internal IConsoleHost ConsoleHost
-        {
-            get { return this.consoleHost; }
-            set
-            {
-                this.consoleHost = value;
-                this.rawUserInterface.ConsoleHost = value;
-            }
-        }
+        private PSHostRawUserInterface rawUserInterface;
 
         #endregion
 
@@ -50,9 +36,20 @@ namespace Microsoft.PowerShell.EditorServices
         /// Creates a new instance of the ConsoleServicePSHostUserInterface
         /// class with the given IConsoleHost implementation.
         /// </summary>
-        public ConsoleServicePSHostUserInterface()
+        public ConsoleServicePSHostUserInterface(IConsoleHost consoleHost)
         {
-            this.rawUserInterface = new ConsoleServicePSHostRawUserInterface();
+            this.consoleHost = consoleHost;
+            this.rawUserInterface =
+                consoleHost.GetRawUI() ?? new SimplePSHostRawUserInterface();
+        }
+
+        /// <summary>
+        /// Creates a new instance of the ConsoleServicePSHostUserInterface
+        /// class with the given IConsoleHost implementation.
+        /// </summary>
+        public ConsoleServicePSHostUserInterface(PSHostRawUserInterface rawUserInterface)
+        {
+            this.rawUserInterface = rawUserInterface;
         }
 
         #endregion
@@ -113,9 +110,9 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         public override int PromptForChoice(
-            string promptCaption, 
-            string promptMessage, 
-            Collection<ChoiceDescription> choiceDescriptions, 
+            string promptCaption,
+            string promptMessage,
+            Collection<ChoiceDescription> choiceDescriptions,
             int defaultChoice)
         {
             if (this.consoleHost != null)
@@ -153,11 +150,11 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         public override PSCredential PromptForCredential(
-            string promptCaption, 
-            string promptMessage, 
-            string userName, 
-            string targetName, 
-            PSCredentialTypes allowedCredentialTypes, 
+            string promptCaption,
+            string promptMessage,
+            string userName,
+            string targetName,
+            PSCredentialTypes allowedCredentialTypes,
             PSCredentialUIOptions options)
         {
             if (this.consoleHost != null)
@@ -185,7 +182,7 @@ namespace Microsoft.PowerShell.EditorServices
                             {
                                 throw new TaskCanceledException(task);
                             }
-                            
+
                             // Return the value of the sole field
                             return (PSCredential)task.Result?["Credential"];
                         });
@@ -207,9 +204,9 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         public override PSCredential PromptForCredential(
-            string caption, 
-            string message, 
-            string userName, 
+            string caption,
+            string message,
+            string userName,
             string targetName)
         {
             return this.PromptForCredential(
@@ -279,8 +276,8 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         public override void Write(
-            ConsoleColor foregroundColor, 
-            ConsoleColor backgroundColor, 
+            ConsoleColor foregroundColor,
+            ConsoleColor backgroundColor,
             string value)
         {
             if (this.consoleHost != null)
@@ -358,7 +355,7 @@ namespace Microsoft.PowerShell.EditorServices
             if (this.consoleHost != null)
             {
                 this.consoleHost.WriteOutput(
-                    value, 
+                    value,
                     true,
                     OutputType.Error,
                     ConsoleColor.Red);
@@ -366,7 +363,7 @@ namespace Microsoft.PowerShell.EditorServices
         }
 
         public override void WriteProgress(
-            long sourceId, 
+            long sourceId,
             ProgressRecord record)
         {
             if (this.consoleHost != null)

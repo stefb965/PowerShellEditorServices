@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol
 {
-    internal interface IMessageSender
+    public interface IMessageSender
     {
         Task SendEvent<TParams>(
             EventType<TParams> eventType,

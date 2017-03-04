@@ -7,7 +7,6 @@ using Microsoft.PowerShell.EditorServices.Extensions;
 using Microsoft.PowerShell.EditorServices.Protocol.LanguageServer;
 using Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol;
 using Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol.Channel;
-using Microsoft.PowerShell.EditorServices.Session;
 using Microsoft.PowerShell.EditorServices.Templates;
 using Microsoft.PowerShell.EditorServices.Utility;
 using Newtonsoft.Json.Linq;
@@ -51,21 +50,29 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
         /// <param name="hostDetails">
         /// Provides details about the host application.
         /// </param>
-        public LanguageServer(HostDetails hostDetails, ProfilePaths profilePaths)
-            : this(hostDetails, profilePaths, new StdioServerChannel())
+        public LanguageServer(PowerShellContext powerShellContext, bool enableConsoleRepl)
+            : this(powerShellContext, enableConsoleRepl, new StdioServerChannel())
         {
         }
 
         /// <param name="hostDetails">
         /// Provides details about the host application.
         /// </param>
-        public LanguageServer(HostDetails hostDetails, ProfilePaths profilePaths, ChannelBase serverChannel)
+        public LanguageServer(PowerShellContext powerShellContext, bool enableConsoleRepl, ChannelBase serverChannel)
             : base(serverChannel)
         {
             this.editorSession = new EditorSession();
-            this.editorSession.StartSession(hostDetails, profilePaths);
-            //this.editorSession.ConsoleService.OutputWritten += this.powerShellContext_OutputWritten;
+            this.editorSession.StartSession(powerShellContext);
             this.editorSession.PowerShellContext.RunspaceChanged += PowerShellContext_RunspaceChanged;
+
+            if (enableConsoleRepl)
+            {
+                //this.editorSession.ConsoleService.EnableConsoleRepl(true);
+            }
+            else
+            {
+                //this.editorSession.ConsoleService.OutputWritten += this.powerShellContext_OutputWritten;
+            }
 
             // Attach to ExtensionService events
             this.editorSession.ExtensionService.CommandAdded += ExtensionService_ExtensionAdded;
@@ -83,10 +90,13 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
             // Always send console prompts through the UI in the language service
             // TODO: This will change later once we have a general REPL available
             // in VS Code.
-            this.editorSession.ConsoleService.PushPromptHandlerContext(
-                new ProtocolPromptHandlerContext(
-                    this,
-                    this.editorSession.ConsoleService));
+            if (!enableConsoleRepl)
+            {
+                //this.editorSession.ConsoleService.PushPromptHandlerContext(
+                //    new ProtocolPromptHandlerContext(
+                //        this,
+                //        this.editorSession.ConsoleService));
+            }
 
             // Set up the output debouncer to throttle output event writes
             this.outputDebouncer = new OutputDebouncer(this);
@@ -146,7 +156,7 @@ namespace Microsoft.PowerShell.EditorServices.Protocol.Server
         protected override async Task Shutdown()
         {
             // Stop the interactive terminal
-            this.editorSession.ConsoleService.CancelReadLoop();
+            //this.editorSession.ConsoleService.CancelReadLoop();
 
             // Make sure remaining output is flushed before exiting
             await this.outputDebouncer.Flush();
@@ -562,7 +572,7 @@ function __Expand-Alias {
             if (!this.consoleReplStarted)
             {
                 // Start the interactive terminal
-                this.editorSession.ConsoleService.StartReadLoop();
+                //this.editorSession.ConsoleService.StartReadLoop();
                 this.consoleReplStarted = true;
             }
 
@@ -1081,7 +1091,7 @@ function __Expand-Alias {
             RequestContext<DebugAdapterMessages.EvaluateResponseBody> requestContext)
         {
             // Cancel the read loop before executing
-            this.editorSession.ConsoleService.CancelReadLoop();
+            //this.editorSession.ConsoleService.CancelReadLoop();
 
             // We don't await the result of the execution here because we want
             // to be able to receive further messages while the current script
@@ -1090,8 +1100,9 @@ function __Expand-Alias {
             var executeTask =
                 this.editorSession.PowerShellContext.ExecuteScriptString(
                     evaluateParams.Expression,
-                    true,
-                    true);
+                    writeInputToHost: true,
+                    writeOutputToHost: true,
+                    addToHistory: true);
 
             // Return the execution result after the task completes so that the
             // caller knows when command execution completed.
@@ -1099,7 +1110,7 @@ function __Expand-Alias {
                 (task) =>
                 {
                     // Start the command loop again
-                    this.editorSession.ConsoleService.StartReadLoop();
+                    //this.editorSession.ConsoleService.StartReadLoop();
 
                     // Return an empty result since the result value is irrelevant
                     // for this request in the LanguageServer

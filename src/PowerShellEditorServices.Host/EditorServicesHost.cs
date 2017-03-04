@@ -3,6 +3,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 //
 
+using Microsoft.PowerShell.EditorServices.Console;
 using Microsoft.PowerShell.EditorServices.Protocol.MessageProtocol.Channel;
 using Microsoft.PowerShell.EditorServices.Protocol.Server;
 using Microsoft.PowerShell.EditorServices.Session;
@@ -29,6 +30,7 @@ namespace Microsoft.PowerShell.EditorServices.Host
     {
         #region Private Fields
 
+        private bool enableConsoleRepl;
         private HostDetails hostDetails;
         private string bundledModulesPath;
         private DebugAdapter debugAdapter;
@@ -58,11 +60,13 @@ namespace Microsoft.PowerShell.EditorServices.Host
         public EditorServicesHost(
             HostDetails hostDetails,
             string bundledModulesPath,
+            bool enableConsoleRepl,
             bool waitForDebugger)
         {
             Validate.IsNotNull(nameof(hostDetails), hostDetails);
 
             this.hostDetails = hostDetails;
+            this.enableConsoleRepl = enableConsoleRepl;
             this.bundledModulesPath = bundledModulesPath;
 
 #if DEBUG
@@ -132,6 +136,21 @@ namespace Microsoft.PowerShell.EditorServices.Host
 #endif
         }
 
+        private PowerShellContext CreatePowerShellContext(ProfilePaths profilePaths)
+        {
+            IConsoleHost consoleHost =
+                this.enableConsoleRepl
+                    ? new ConsoleService()
+                    : new ProtocolConsoleInterface();
+
+            ConsoleServicePSHost psHost =
+                new ConsoleServicePSHost(
+                    consoleHost,
+                    this.hostDetails);
+
+            return new PowerShellContext(psHost, profilePaths);
+        }
+
         /// <summary>
         /// Starts the language service with the specified TCP socket port.
         /// </summary>
@@ -139,10 +158,12 @@ namespace Microsoft.PowerShell.EditorServices.Host
         /// <param name="profilePaths">The object containing the profile paths to load for this session.</param>
         public void StartLanguageService(int languageServicePort, ProfilePaths profilePaths)
         {
+            PowerShellContext powerShellContext = this.CreatePowerShellContext(profilePaths);
+
             this.languageServer =
                 new LanguageServer(
-                    hostDetails,
-                    profilePaths,
+                    powerShellContext,
+                    this.enableConsoleRepl,
                     new TcpSocketServerChannel(languageServicePort));
 
             this.languageServer.Start().Wait();
@@ -163,7 +184,7 @@ namespace Microsoft.PowerShell.EditorServices.Host
             ProfilePaths profilePaths,
             bool useExistingSession)
         {
-            if (useExistingSession)
+            if (this.enableConsoleRepl && useExistingSession)
             {
                 this.debugAdapter =
                     new DebugAdapter(
@@ -172,10 +193,12 @@ namespace Microsoft.PowerShell.EditorServices.Host
             }
             else
             {
+                PowerShellContext powerShellContext =
+                    this.CreatePowerShellContext(profilePaths);
+
                 this.debugAdapter =
                     new DebugAdapter(
-                        hostDetails,
-                        profilePaths,
+                        powerShellContext,
                         new TcpSocketServerChannel(debugServicePort),
                         this.languageServer?.EditorOperations);
             }
@@ -183,8 +206,9 @@ namespace Microsoft.PowerShell.EditorServices.Host
             this.debugAdapter.SessionEnded +=
                 (obj, args) =>
                 {
-                    // Only restart if we're reusing the existing session,
-                    // otherwise the process should terminate
+                    // Only restart if we're reusing the existing session
+                    // or if we're not using the console repl, otherwise
+                    // the process should terminate
                     if (useExistingSession)
                     {
                         Logger.Write(
@@ -192,6 +216,10 @@ namespace Microsoft.PowerShell.EditorServices.Host
                             "Previous debug session ended, restarting debug service...");
 
                         this.StartDebugService(debugServicePort, profilePaths, true);
+                    }
+                    else if (!this.enableConsoleRepl)
+                    {
+                        this.StartDebugService(debugServicePort, profilePaths, false);
                     }
                 };
 
